@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -u
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CODEX_AGENT_RUNTIME_SIGNAL="$ROOT_DIR/scripts/codex-agent-runtime-signal"
+SESSION_ID=""
+AGENT_NAME="script"
+START_EVENT="CommandStarted"
+DONE_EVENT="CommandFinished"
+BLOCKED_EVENT="CommandFailed"
+
+usage() {
+  cat <<EOF
+usage: $0 [--session <id>] [--agent <name>] [--start-event <name>] [--done-event <name>] [--blocked-event <name>] -- <command> [args...]
+
+Run a local command while updating codex-agent-runtime-signal:
+  working before the command starts
+  done when the command exits 0
+  blocked when the command exits non-zero
+
+The wrapped command's original exit code is preserved.
+EOF
+}
+
+option_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "$value" || "$value" == -* ]]; then
+    echo "codex-agent-runtime-signal-run: missing value for $option" >&2
+    exit 2
+  fi
+  printf "%s\n" "$value"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session|-s)
+      SESSION_ID="$(option_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --agent|--source)
+      AGENT_NAME="$(option_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --start-event)
+      START_EVENT="$(option_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --done-event)
+      DONE_EVENT="$(option_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --blocked-event|--failed-event)
+      BLOCKED_EVENT="$(option_value "$1" "${2:-}")"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      if [[ "$1" == -* ]]; then
+        echo "codex-agent-runtime-signal-run: unknown option: $1" >&2
+        exit 2
+      fi
+      break
+      ;;
+  esac
+done
+
+if [[ $# -eq 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+if [[ -z "$SESSION_ID" ]]; then
+  command_name="$(basename "$1")"
+  SESSION_ID="script-$command_name-$$"
+fi
+
+if [[ ! -x "$CODEX_AGENT_RUNTIME_SIGNAL" ]]; then
+  echo "codex-agent-runtime-signal-run: codex-agent-runtime-signal wrapper not found at $CODEX_AGENT_RUNTIME_SIGNAL" >&2
+  exit 127
+fi
+
+"$CODEX_AGENT_RUNTIME_SIGNAL" working \
+  --session "$SESSION_ID" \
+  --agent "$AGENT_NAME" \
+  --event "$START_EVENT" >/dev/null
+
+"$@"
+status=$?
+
+if [[ "$status" -eq 0 ]]; then
+  "$CODEX_AGENT_RUNTIME_SIGNAL" done \
+    --session "$SESSION_ID" \
+    --agent "$AGENT_NAME" \
+    --event "$DONE_EVENT" >/dev/null
+else
+  "$CODEX_AGENT_RUNTIME_SIGNAL" blocked \
+    --session "$SESSION_ID" \
+    --agent "$AGENT_NAME" \
+    --event "$BLOCKED_EVENT:$status" >/dev/null
+fi
+
+exit "$status"

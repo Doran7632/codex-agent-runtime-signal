@@ -1,0 +1,20 @@
+codex-agent-runtime-signal
+Copyright 2026 XiongYang Guan
+
+This product includes software developed by XiongYang Guan.
+
+The Apache License 2.0 applies to the source code in this repository unless
+another license is stated for a specific file.
+
+Non-code assets are subject to separate terms described in ASSET_LICENSES.md.
+These assets include bundled audio files, app icons, logos, screenshots, GIFs,
+and marketing artwork.
+
+The bundled New Zealand crossing sounds in
+Sources/CodexAgentRuntimeSignal/Resources/ were recorded by XiongYang Guan.
+
+The codex-agent-runtime-signal name, app icon, logo, and visual identity are provided
+for identification and documentation purposes only. The Apache License 2.0
+does not grant permission to use those brand assets to present a competing,
+modified, or redistributed product as an official codex-agent-runtime-signal release.
+See TRADEMARKS.md for brand usage guidelines.
