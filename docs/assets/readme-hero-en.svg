@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="title desc">
+  <title id="title">codex-agent-runtime-signal website hero preview</title>
+  <desc id="desc">A promotional preview for codex-agent-runtime-signal with signal lights, feature cards, and a website pill.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.34" stop-color="#0b1018"/>
+      <stop offset="0.7" stop-color="#0d3f42"/>
+      <stop offset="1" stop-color="#101026"/>
+    </linearGradient>
+    <radialGradient id="warm" cx="0.08" cy="0.16" r="0.64">
+      <stop offset="0" stop-color="#f97316" stop-opacity="0.56"/>
+      <stop offset="0.5" stop-color="#f97316" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#f97316" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet" cx="0.92" cy="0.18" r="0.64">
+      <stop offset="0" stop-color="#7c3aed" stop-opacity="0.6"/>
+      <stop offset="0.46" stop-color="#7c3aed" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="teal" cx="0.56" cy="0.86" r="0.58">
+      <stop offset="0" stop-color="#14b8a6" stop-opacity="0.46"/>
+      <stop offset="0.52" stop-color="#14b8a6" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#14b8a6" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <style>
+      .font { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
+      .muted { fill: #cbd5e1; opacity: 0.82; }
+      .label { fill: #f8fafc; font-weight: 760; }
+      .small { fill: #cbd5e1; font-weight: 650; opacity: 0.9; }
+      .card { fill: #101826; fill-opacity: 0.72; stroke: #ffffff; stroke-opacity: 0.12; }
+      .avatarText { fill: white; font-size: 25px; font-weight: 860; text-anchor: middle; dominant-baseline: middle; alignment-baseline: middle; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="740" rx="0" fill="url(#bg)"/>
+  <rect width="1600" height="740" fill="url(#warm)"/>
+  <rect width="1600" height="740" fill="url(#violet)"/>
+  <rect width="1600" height="740" fill="url(#teal)"/>
+  <rect width="1600" height="740" fill="url(#grid)" opacity="0.58"/>
+
+  <g class="font" filter="url(#shadow)">
+    <g transform="translate(76 82)">
+      <image x="-16" y="-16" width="90" height="90" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,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AATAWTHgsO8ZAA+NAYd93wB4SAw47AJAADj+FhwA1j8ArF8EuNwCwASACQATAAgAEwAmAEwAIABMAJgAMAGAADABYALABAACwASACQATAAJAAJgAMAFgAkAACAATACYATAAIAAFgAsAEgAAQAAJAAJgAMAEgAASAABABJgBMADj+AkAACAATAALABIAAEAACwASAADABIAAEgACIPv4CoH8AiAABIAAEgAAwASAATAAIAAEgAASACEg4/gJAAAgAASAATAAIABMAAkAAiAABIAAEgDn+AkAACAABYALABIAAEAACIOf4C4D+ASACBIAAEAECwE7+GzucfY+/ABAAjr8AEAEmAASAOf4CQAAIAMdfAKQEgAgQAAJAAAgAASACAo+/ABAAAkAAiAABIAAEgDn+AkAACADHXwCkBIAIEAACQAAIAAEgAgKPvwAQAAJABIgAASAABIA5/o6/ABAAjr8ASAkAESAABIAAEAECQAQEHn8B4PgLAAEgABx/ARAaACJAAAgAASACBIAICDz+AsDxFwAiQAA4/gIgNABEgABw/AWACBAAIiDw+AsAx18ACAAB4PgLgNAAEAECQACIABEgAERA4PEXAI6/4y8ABIDjLwICj78IEAACQACIAMdfAAQHgAhw/AWAABABAkAEBB5/AeD4CwARIAAcfxEQePxFgABw/AWACHD8BUBwAIgAx18ACAARIABEQODxFwCOvwAQASLA8RcBgcdfBDj+jr8AEACOvwgIPf4iQAAIABEgAhx/ERB6/EWA4+/4CwAR4PiLgNDjLwIcfwEgAESA4y8CQo+/CHD8BYAIEAGOvwgIPf4iwPF3/AWACHD8RUDo8RcB2cdfAIgAEeD4i4Dg4y8CHH8EgBBw/EVA6PEXAVmHXwCIABHg+IsAx18EOP4IABHg8IuA9OMvBDKOvwAQASLA8RcCDr8IcPwRAELA8RcBjr8I6Hz4BYAIEAEOvxBw+IWA448AEAIOvwhw/IVA98MvAESAEHD4hYDDLwQCD7/jLwKEgMMvBBx+IRB2+B1/ASAEHH4h4PALgbDDLwBEgBhw+MWAoy8Ewo6+4y8ChICjLwYcfTEQePgdfwEgCBx9MeDox8ZA+uPucooAQeDYiwLHPiIKPK6OvwgwMzPHHwFgZmYCABFgZmaOPyLAzMwcf0SAmZk5/pR36QffzCz++F86h14FMDMzz/4RAWZm5vjjrQAzM/PSPyLAzMwcfxoEgAgwM4s5/gIAEWBm5viDCDAzc/zJDQARYGbW8vgLAESAmZnjDyLAzMzxh39+aISAmdm+h18AIALMzBx/EAFmZo4/iAAzM8cf7o0AIWBmVvbwO/6MDQARYGZW8vgLAOZEgBAwMytz+B1/RICZmeMPkyJACJiZLTn8jj8iwMzM8YeFESAEzMyGH37Hn7oRIATMzIYcfsefPSJACJiZHXb4HX/2iwAhYGb2pMPv+LN3BAgBM3P4HX+CI0AImJnD7/gTHgJiwMwcfYef4AgQA2bm6Dv+hEeAGDCzwKPv+CMCBIGZBR18xx8hIAjMLOzgO/yIAGFgZgGH3vFHCJiZhQ9EgJmZ4w9CwMzM4QchYGbm8IMIMDNz/EEImJk5/CAEzMwcfhACZmYOP4gBMzNHH4SAmZnDD2LAzMzRBzFgZgYIAjNz8AFBYGYOPiAKzMyxB0SCmTnuAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA80R+bScIzYF2mqAAAAABJRU5ErkJggg=="/>
+      <text x="76" y="38" fill="#f8fafc" font-size="28" font-weight="820">codex-agent-runtime-signal</text>
+    </g>
+
+    <g transform="translate(1234 88)">
+      <rect x="0" y="0" width="270" height="44" rx="22" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.18"/>
+      <text x="135" y="29" fill="#d7f8f3" font-size="21" font-weight="760" text-anchor="middle">runtimesignalbar.app</text>
+    </g>
+
+    <text x="78" y="230" fill="#ffffff" font-size="72" font-weight="900" letter-spacing="0">
+      Know what every AI agent
+    </text>
+    <text x="78" y="318" fill="#ffffff" font-size="72" font-weight="900" letter-spacing="0">
+      is doing, <tspan fill="#fb7185">from your</tspan>
+    </text>
+    <text x="78" y="406" fill="#38bdf8" font-size="72" font-weight="900" letter-spacing="0">
+      menu bar.
+    </text>
+
+    <text x="80" y="462" class="muted" font-size="25" font-weight="650">
+      Codex and Claude activity, visible from your menu bar through red, yellow, and green status lights
+    </text>
+
+    <g transform="translate(80 520)">
+      <g transform="translate(0 0)">
+        <rect class="card" width="250" height="78" rx="12"/>
+        <rect x="18" y="18" width="42" height="42" rx="9" fill="#2563eb"/>
+        <text class="avatarText" x="39" y="40">C</text>
+        <text class="label" x="76" y="46" font-size="24">Codex</text>
+      </g>
+      <g transform="translate(272 0)">
+        <rect class="card" width="230" height="78" rx="12"/>
+        <rect x="18" y="18" width="42" height="42" rx="9" fill="#a855f7"/>
+        <text class="avatarText" x="39" y="40">C</text>
+        <text class="label" x="76" y="46" font-size="24">Claude</text>
+      </g>
+    </g>
+
+  </g>
+</svg>
