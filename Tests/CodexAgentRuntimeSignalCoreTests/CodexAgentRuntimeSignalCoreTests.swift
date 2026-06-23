@@ -417,7 +417,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
     func testCodexDesktopActivityMonitorPrimesCompletionStateWithoutReplayingHistory() throws {
         let fixture = try makeTemporaryCodexSessionsRoot()
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
-        let now = Date(timeIntervalSince1970: 1_000)
+        let now = Date()
         let sessionID = "019e92c4-d204-7ce2-b7c2-63b01e7789b9"
         let sessionFile = fixture.sessionsRoot
             .appendingPathComponent("rollout-2026-06-05T01-13-52-\(sessionID).jsonl")
@@ -454,7 +454,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
     func testCodexDesktopActivityMonitorDoesNotReviveCompletedSessionWithHeartbeat() throws {
         let fixture = try makeTemporaryCodexSessionsRoot()
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
-        let now = Date(timeIntervalSince1970: 1_000)
+        let now = Date()
         let sessionFile = fixture.sessionsRoot
             .appendingPathComponent("rollout-2026-06-02T00-00-00-019e83ed-3f20-7000-9000-000000000004.jsonl")
         let completedTimestamp = isoTimestamp(now)
@@ -1655,7 +1655,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
     }
 
     func testActivityPresentationKeepsMultipleSessionsFromSameSource() {
-        let now = Date(timeIntervalSince1970: 1_000)
+        let now = Date()
         let visible = ActivityPresentation.visibleSessions(
             from: [
                 SessionStatus(
@@ -1690,7 +1690,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
     }
 
     func testActivityPresentationCollapsesMultipleRowsForSameCodexThread() {
-        let now = Date(timeIntervalSince1970: 1_000)
+        let now = Date()
         let threadID = "019edad4-7277-7da2-bc96-9d00ffb7fa0b"
         let visible = ActivityPresentation.visibleSessions(
             from: [
@@ -1732,6 +1732,77 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             1
         )
         XCTAssertTrue(visible.contains { $0.sessionID == "codex-cli:another-thread" })
+    }
+
+    @MainActor
+    func testActivitySnapshotMergesJetBrainsActivityWithIDEADiscoveryForSameThread() throws {
+        let fixture = try makeTemporaryStore(sessionTTLSeconds: 300)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let now = Date()
+        let threadID = "019e39b0-bfb3-72a3-9fc7-e19de5457ee5"
+
+        _ = try fixture.store.applySessionSignal(
+            .thinking,
+            sessionID: "codex-jetbrains:\(threadID)",
+            agent: "codex-jetbrains",
+            lastEvent: "UserPromptSubmit",
+            updatedAt: now
+        )
+
+        let model = MenuBarStatusModel(
+            store: fixture.store,
+            codexPlatformPresenceMonitor: CodexPlatformPresenceMonitor(processScanInterval: 3_600),
+            codexThreadNameResolver: StaticCodexThreadNameResolver(namesBySessionID: [
+                "codex-idea:\(threadID)": "申万二期迁移功能五"
+            ], hostApplicationsBySessionID: [
+                "codex-idea:\(threadID)": "IDEA"
+            ])
+        )
+        model.appLanguage = .zhHans
+        model.replaceDesktopAppSessionsForTesting([
+            SessionStatus(
+                sessionID: "codex-idea:\(threadID)",
+                signal: .idle,
+                updatedAt: now.addingTimeInterval(1),
+                agent: "codex-idea",
+                lastEvent: "CodexSessionOpen"
+            )
+        ])
+
+        let visible = ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now, limit: nil)
+
+        XCTAssertEqual(visible.count, 1)
+        XCTAssertEqual(ActivityPresentation.activitySessionIdentityKey(for: visible[0]), "codex:thread:\(threadID)")
+        XCTAssertEqual(
+            model.activitySessionLine(for: visible[0]),
+            "IDEA - 运行中 - (申万二期迁移功能五)"
+        )
+    }
+
+    @MainActor
+    func testActivitySessionLineNormalizesJetBrainsHostApplicationToIDEA() {
+        let threadID = "019e39b0-bfb3-72a3-9fc7-e19de5457ee5"
+        let model = MenuBarStatusModel(
+            codexThreadNameResolver: StaticCodexThreadNameResolver(
+                namesBySessionID: ["codex-jetbrains:\(threadID)": "申万二期迁移功能五"],
+                hostApplicationsBySessionID: ["codex-jetbrains:\(threadID)": "JetBrains"]
+            )
+        )
+        model.appLanguage = .zhHans
+
+        let session = SessionStatus(
+            sessionID: "codex-jetbrains:\(threadID)",
+            signal: .thinking,
+            updatedAt: Date(),
+            agent: "codex-jetbrains",
+            lastEvent: "UserPromptSubmit"
+        )
+
+        XCTAssertEqual(
+            model.activitySessionLine(for: session),
+            "IDEA - 运行中 - (申万二期迁移功能五)"
+        )
     }
 
     @MainActor
@@ -2289,8 +2360,12 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             model.stabilizedPlatformPresenceSessions([], now: now.addingTimeInterval(30)).map(\.sessionID),
             [session.sessionID]
         )
+        XCTAssertEqual(
+            model.stabilizedPlatformPresenceSessions([], now: now.addingTimeInterval(120)).map(\.sessionID),
+            [session.sessionID]
+        )
         XCTAssertTrue(
-            model.stabilizedPlatformPresenceSessions([], now: now.addingTimeInterval(120)).isEmpty
+            model.stabilizedPlatformPresenceSessions([], now: now.addingTimeInterval(601)).isEmpty
         )
     }
 
@@ -2338,6 +2413,122 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             [
                 "桌面终端 - 运行中 - (正在运行的终端会话)",
                 "桌面终端 - 空闲 - (打开但空闲的终端会话)"
+            ]
+        )
+    }
+
+    @MainActor
+    func testActivitySnapshotKeepsMultipleOpenIDEACodexSessions() throws {
+        let fixture = try makeTemporaryStore(sessionTTLSeconds: 300)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let now = Date()
+        let firstThreadID = "019e39a0-ac39-7411-9e26-3ec6f1f5c642"
+        let secondThreadID = "019e9055-6952-7e50-b1fb-183473424e0b"
+
+        let model = MenuBarStatusModel(
+            store: fixture.store,
+            codexPlatformPresenceMonitor: CodexPlatformPresenceMonitor(processScanInterval: 3_600),
+            codexThreadNameResolver: StaticCodexThreadNameResolver(namesBySessionID: [
+                "codex-idea:\(firstThreadID)": "申万迁移二期功能四",
+                "codex-idea:\(secondThreadID)": "申万迁移二期功能十"
+            ])
+        )
+        model.appLanguage = .zhHans
+        model.replaceDesktopAppSessionsForTesting([
+            SessionStatus(
+                sessionID: "codex-idea:\(firstThreadID)",
+                signal: .idle,
+                updatedAt: now,
+                agent: "codex-idea",
+                lastEvent: "CodexSessionOpen"
+            ),
+            SessionStatus(
+                sessionID: "codex-idea:\(secondThreadID)",
+                signal: .idle,
+                updatedAt: now,
+                agent: "codex-idea",
+                lastEvent: "CodexSessionOpen"
+            )
+        ])
+
+        let visible = ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now, limit: nil)
+
+        XCTAssertEqual(
+            Set(visible.map(\.sessionID)),
+            [
+                "codex-idea:\(firstThreadID)",
+                "codex-idea:\(secondThreadID)"
+            ]
+        )
+        XCTAssertEqual(
+            visible.map { model.activitySessionLine(for: $0) },
+            [
+                "IDEA - 空闲 - (申万迁移二期功能四)",
+                "IDEA - 空闲 - (申万迁移二期功能十)"
+            ]
+        )
+    }
+
+    @MainActor
+    func testActivitySnapshotKeepsSessionRowOrderWhenIdleSessionBecomesRunning() throws {
+        let fixture = try makeTemporaryStore(sessionTTLSeconds: 300)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let now = Date()
+        let firstThreadID = "019e39a0-ac39-7411-9e26-3ec6f1f5c642"
+        let secondThreadID = "019e39b1-0841-7070-8bde-c6c87e23460a"
+        let model = MenuBarStatusModel(
+            store: fixture.store,
+            codexPlatformPresenceMonitor: CodexPlatformPresenceMonitor(processScanInterval: 3_600),
+            codexThreadNameResolver: StaticCodexThreadNameResolver(namesBySessionID: [
+                "codex-idea:\(firstThreadID)": "申万迁移二期功能四",
+                "codex-idea:\(secondThreadID)": "申万二期迁移功能六"
+            ])
+        )
+        model.appLanguage = .zhHans
+        model.clearStableSessionOrderForTesting()
+        model.replaceDesktopAppSessionsForTesting([
+            SessionStatus(
+                sessionID: "codex-idea:\(firstThreadID)",
+                signal: .idle,
+                updatedAt: now,
+                agent: "codex-idea",
+                lastEvent: "CodexSessionOpen"
+            ),
+            SessionStatus(
+                sessionID: "codex-idea:\(secondThreadID)",
+                signal: .idle,
+                updatedAt: now.addingTimeInterval(1),
+                agent: "codex-idea",
+                lastEvent: "CodexSessionOpen"
+            )
+        ])
+
+        XCTAssertEqual(
+            ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now, limit: nil)
+                .map { model.activitySessionLine(for: $0) },
+            [
+                "IDEA - 空闲 - (申万迁移二期功能四)",
+                "IDEA - 空闲 - (申万二期迁移功能六)"
+            ]
+        )
+
+        _ = try fixture.store.applySessionSignal(
+            .working,
+            sessionID: "codex-idea:\(secondThreadID)",
+            agent: "codex-idea",
+            lastEvent: "PreToolUse",
+            updatedAt: now.addingTimeInterval(30)
+        )
+        model.reloadSnapshotSynchronouslyForTesting()
+
+        XCTAssertEqual(
+            ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now.addingTimeInterval(30), limit: nil)
+                .map { model.activitySessionLine(for: $0) },
+            [
+                "IDEA - 空闲 - (申万迁移二期功能四)",
+                "IDEA - 运行中 - (申万二期迁移功能六)"
             ]
         )
     }
@@ -3010,6 +3201,55 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssertTrue(sessions.allSatisfy { $0.signal == .idle })
     }
 
+    func testCodexPlatformPresenceMonitorDetectsOpenIDEASessionWhenPsCommandIsTruncated() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let threadID = "019e39a0-ac39-7411-9e26-3ec6f1f5c642"
+        let rolloutPath = "/Users/me/.codex/sessions/2026/05/18/rollout-2026-05-18T13-48-11-\(threadID).jsonl"
+        let sessions = CodexPlatformPresenceMonitor.detectOpenCodexSessions(
+            processes: [
+                CodexPlatformPresenceMonitor.RunningProcessInfo(
+                    pid: 23023,
+                    ppid: 23022,
+                    status: "S+",
+                    tty: "ttys001",
+                    command: "/Users/doranxavi",
+                    arguments: "/Users/me/Library/Caches/JetBrains/IntelliJIdea2026.1/aia/codex/bin/codex resume"
+                ),
+                CodexPlatformPresenceMonitor.RunningProcessInfo(
+                    pid: 23022,
+                    ppid: 23021,
+                    status: "S+",
+                    tty: "ttys001",
+                    command: "node",
+                    arguments: "/Users/me/Library/Caches/JetBrains/IntelliJIdea2026.1/aia/codex/bin/codex resume"
+                ),
+                CodexPlatformPresenceMonitor.RunningProcessInfo(
+                    pid: 23021,
+                    ppid: 23020,
+                    status: "S+",
+                    tty: "ttys001",
+                    command: "zsh",
+                    arguments: "-zsh"
+                ),
+                CodexPlatformPresenceMonitor.RunningProcessInfo(
+                    pid: 23020,
+                    ppid: 1,
+                    status: "S",
+                    tty: "??",
+                    command: "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea",
+                    arguments: "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea"
+                )
+            ],
+            openRolloutFilesByPID: [23023: rolloutPath],
+            now: now
+        )
+
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.sessionID, "codex-idea:\(threadID)")
+        XCTAssertEqual(sessions.first?.agent, "codex-idea")
+        XCTAssertEqual(sessions.first?.lastEvent, "CodexSessionOpen")
+    }
+
     func testCodexPlatformPresenceMonitorIgnoresCodexAppServerAsCLI() {
         let sessions = CodexPlatformPresenceMonitor.detectSessions(
             applications: [],
@@ -3493,18 +3733,25 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
     private final class StaticCodexThreadNameResolver: CodexThreadNameResolving {
         let namesBySessionID: [String: String]
+        let hostApplicationsBySessionID: [String: String]
         let indexedSessionValues: [CodexIndexedSession]
 
         init(
             namesBySessionID: [String: String],
+            hostApplicationsBySessionID: [String: String] = [:],
             indexedSessions: [CodexIndexedSession] = []
         ) {
             self.namesBySessionID = namesBySessionID
+            self.hostApplicationsBySessionID = hostApplicationsBySessionID
             self.indexedSessionValues = indexedSessions
         }
 
         func threadName(for sessionID: String) -> String? {
             namesBySessionID[sessionID]
+        }
+
+        func hostApplicationName(for sessionID: String) -> String? {
+            hostApplicationsBySessionID[sessionID]
         }
 
         func indexedSessions() -> [CodexIndexedSession] {

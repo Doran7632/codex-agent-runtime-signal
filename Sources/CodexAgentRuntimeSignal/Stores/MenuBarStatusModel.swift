@@ -359,7 +359,7 @@ final class MenuBarStatusModel: ObservableObject {
     private static let completedDisplayWindow: TimeInterval = 30
     private static let recentActivityFallbackWindow: TimeInterval = 5 * 60
     private static let desktopPresenceSuppressionWindow: TimeInterval = 5 * 60
-    private static let openCodexSessionRetentionWindow: TimeInterval = 90
+    private static let openCodexSessionRetentionWindow: TimeInterval = 10 * 60
     private static let passiveActiveDisplayWindow: TimeInterval = 45
     private static let combinedDisplaySessionsCacheTTL: TimeInterval = 1
     private var statusLightSequence: [StatusLightOverrideFrame] = []
@@ -372,6 +372,8 @@ final class MenuBarStatusModel: ObservableObject {
     private var isAutomaticUpdateCheckInFlight = false
     private var retainedOpenCodexSessionsByID: [String: SessionStatus] = [:]
     private var retainedOpenCodexSessionSeenAtByID: [String: Date] = [:]
+    private var stableSessionOrderByIdentityKey: [String: Int] = [:]
+    private var nextStableSessionOrder = 0
     private var cachedCombinedDisplaySessions: CombinedDisplaySessionsCache?
     private var cachedDisplaySnapshot: DisplaySnapshotCache?
     private var lastNotifiedUpdateVersion: String?
@@ -577,6 +579,24 @@ final class MenuBarStatusModel: ObservableObject {
         }
 
         enqueueStateReload()
+    }
+
+    func reloadSynchronouslyForUserInteraction() {
+        let latestReleaseInfo = ReleaseInfo.current()
+        if latestReleaseInfo != releaseInfo {
+            releaseInfo = latestReleaseInfo
+        }
+
+        reloadSnapshotSynchronouslyForTesting()
+        refreshDesktopAppPresenceForUserInteraction()
+    }
+
+    func reloadSnapshotSynchronouslyForTesting() {
+        let latestSnapshot = store.readSnapshot()
+        if latestSnapshot != snapshot {
+            snapshot = latestSnapshot
+            invalidateDisplayCaches()
+        }
     }
 
     func reloadFromWatcher() {
@@ -1499,6 +1519,7 @@ final class MenuBarStatusModel: ObservableObject {
 
                     if latestSnapshot != self.snapshot {
                         self.snapshot = latestSnapshot
+                        self.invalidateDisplayCaches()
                     }
 
                     if self.isStateReloadQueued {
@@ -1747,6 +1768,7 @@ final class MenuBarStatusModel: ObservableObject {
             clearRetainedOpenCodexSessions()
             if !desktopAppSessions.isEmpty {
                 desktopAppSessions = []
+                invalidateDisplayCaches()
             }
             return
         }
@@ -1840,8 +1862,40 @@ final class MenuBarStatusModel: ObservableObject {
         retainedOpenCodexSessionSeenAtByID = [:]
     }
 
+    func clearStableSessionOrderForTesting() {
+        stableSessionOrderByIdentityKey = [:]
+        nextStableSessionOrder = 0
+    }
+
+    func refreshDesktopAppPresenceForUserInteraction() {
+        guard shouldPollPlatformPresence else {
+            clearRetainedOpenCodexSessions()
+            if !desktopAppSessions.isEmpty {
+                desktopAppSessions = []
+            }
+            return
+        }
+
+        let latestSessions = stabilizedPlatformPresenceSessions(
+            filteredPlatformPresenceSessions(
+                codexPlatformPresenceMonitor.detectSessions(forceRefresh: true)
+            ),
+            now: Date()
+        )
+        if latestSessions != desktopAppSessions {
+            desktopAppSessions = latestSessions
+            invalidateDisplayCaches()
+        }
+    }
+
     func replaceDesktopAppSessionsForTesting(_ sessions: [SessionStatus]) {
         desktopAppSessions = sessions
+        invalidateDisplayCaches()
+    }
+
+    private func invalidateDisplayCaches() {
+        cachedCombinedDisplaySessions = nil
+        cachedDisplaySnapshot = nil
     }
 
     private func combinedDisplaySessions(now: Date = Date()) -> [SessionStatus] {
@@ -1870,7 +1924,7 @@ final class MenuBarStatusModel: ObservableObject {
             sessions.append(desktopSession)
         }
 
-        let sortedSessions = sessions.sorted(by: Self.displaySessionSortPrecedes)
+        let sortedSessions = sortSessionsByStableListOrder(sessions)
         cachedCombinedDisplaySessions = CombinedDisplaySessionsCache(
             snapshot: snapshot,
             desktopAppSessions: desktopAppSessions,
@@ -1970,7 +2024,35 @@ final class MenuBarStatusModel: ObservableObject {
             }
         }
 
-        return sessionsByID.values.sorted(by: Self.displaySessionSortPrecedes)
+        return sortSessionsByStableListOrder(Array(sessionsByID.values))
+    }
+
+    private func sortSessionsByStableListOrder(_ sessions: [SessionStatus]) -> [SessionStatus] {
+        let visibleIdentityKeys = Set(sessions.map(ActivityPresentation.activitySessionIdentityKey(for:)))
+
+        stableSessionOrderByIdentityKey = stableSessionOrderByIdentityKey.filter { key, _ in
+            visibleIdentityKeys.contains(key)
+        }
+
+        for session in sessions {
+            let key = ActivityPresentation.activitySessionIdentityKey(for: session)
+            guard stableSessionOrderByIdentityKey[key] == nil else { continue }
+            stableSessionOrderByIdentityKey[key] = nextStableSessionOrder
+            nextStableSessionOrder += 1
+        }
+
+        return sessions.sorted { lhs, rhs in
+            let lhsKey = ActivityPresentation.activitySessionIdentityKey(for: lhs)
+            let rhsKey = ActivityPresentation.activitySessionIdentityKey(for: rhs)
+            let lhsOrder = stableSessionOrderByIdentityKey[lhsKey] ?? Int.max
+            let rhsOrder = stableSessionOrderByIdentityKey[rhsKey] ?? Int.max
+
+            if lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+
+            return Self.displaySessionSortPrecedes(lhs, rhs)
+        }
     }
 
     private static func mergedDiscoveredCodexSession(

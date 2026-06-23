@@ -555,7 +555,7 @@ final class CodexThreadNameIndex: CodexThreadNameResolving {
             return "IDEA"
         }
         if containsAny(combined, tokens: ["jetbrains"]) {
-            return "JetBrains"
+            return "IDEA"
         }
         if containsAny(combined, tokens: ["visual studio code", "vscode", "vs-code"]) {
             return "VS Code"

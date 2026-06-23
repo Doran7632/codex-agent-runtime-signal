@@ -56,9 +56,9 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         let processMatch: @Sendable (RunningProcessInfo) -> Bool
     }
 
-    private static let processScanTimeoutSeconds: TimeInterval = 0.7
-    private static let targetedProcessScanTimeoutSeconds: TimeInterval = 0.3
-    private static let openFileScanTimeoutSeconds: TimeInterval = 1.2
+    private static let processScanTimeoutSeconds: TimeInterval = 1.5
+    private static let targetedProcessScanTimeoutSeconds: TimeInterval = 0.8
+    private static let openFileScanTimeoutSeconds: TimeInterval = 2.5
     private let processScanInterval: TimeInterval
     private let processCacheLock = NSLock()
     private var cachedProcesses: [RunningProcessInfo] = []
@@ -69,6 +69,10 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
     }
 
     func detectSessions(now: Date = Date()) -> [SessionStatus] {
+        detectSessions(now: now, forceRefresh: false)
+    }
+
+    func detectSessions(now: Date = Date(), forceRefresh: Bool) -> [SessionStatus] {
         Self.detectSessions(
             applications: NSWorkspace.shared.runningApplications.map {
                 RunningApplicationInfo(
@@ -76,7 +80,7 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
                     localizedName: $0.localizedName
                 )
             },
-            processes: runningProcesses(now: now),
+            processes: runningProcesses(now: now, forceRefresh: forceRefresh),
             now: now
         )
     }
@@ -254,17 +258,25 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         if semaphore.wait(timeout: .now() + targetedProcessScanTimeoutSeconds) == .timedOut {
             process.terminate()
             _ = semaphore.wait(timeout: .now() + 0.1)
-            return []
+            return runningCodexProcessIDsFromProcessList()
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0,
               let output = String(data: data, encoding: .utf8)
         else {
-            return []
+            return runningCodexProcessIDsFromProcessList()
         }
 
         return Set(output.split(whereSeparator: \.isNewline).compactMap { Int($0) })
+    }
+
+    private static func runningCodexProcessIDsFromProcessList() -> Set<Int> {
+        Set(
+            runningAllProcesses()
+                .filter(\.looksLikeOpenCodexSessionProcess)
+                .compactMap(\.pid)
+        )
     }
 
     private static func processDetails(for processIDs: Set<Int>) -> [RunningProcessInfo] {
@@ -309,7 +321,7 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         if semaphore.wait(timeout: .now() + targetedProcessScanTimeoutSeconds) == .timedOut {
             process.terminate()
             _ = semaphore.wait(timeout: .now() + 0.1)
-            return []
+            return runningAllProcesses()
         }
 
         let data = (try? Data(contentsOf: outputURL)) ?? Data()
@@ -317,7 +329,7 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         guard process.terminationStatus == 0,
               let output = String(data: data, encoding: .utf8)
         else {
-            return []
+            return runningAllProcesses()
         }
 
         return parseProcesses(from: output)
@@ -374,9 +386,10 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         return parseProcesses(from: output)
     }
 
-    private func runningProcesses(now: Date) -> [RunningProcessInfo] {
+    private func runningProcesses(now: Date, forceRefresh: Bool = false) -> [RunningProcessInfo] {
         processCacheLock.lock()
-        if let lastProcessScanAt,
+        if !forceRefresh,
+           let lastProcessScanAt,
            now.timeIntervalSince(lastProcessScanAt) < processScanInterval {
             let processes = cachedProcesses
             processCacheLock.unlock()
@@ -442,10 +455,12 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         now: Date
     ) -> [SessionStatus] {
         let codexProcesses = processes.filter(\.looksLikeOpenCodexSessionProcess)
-        let processIDs = codexProcesses.compactMap(\.pid)
-        let openRolloutFilesByPID = processIDs.isEmpty
+        let rolloutProcessIDs = codexProcesses
+            .filter(\.canHoldOpenCodexRolloutFile)
+            .compactMap(\.pid)
+        let openRolloutFilesByPID = rolloutProcessIDs.isEmpty
             ? [:]
-            : runningOpenRolloutFiles(for: processIDs)
+            : runningOpenRolloutFiles(for: rolloutProcessIDs)
 
         let rolloutSessions = detectOpenCodexSessions(
             processes: processes,
@@ -622,7 +637,7 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         if semaphore.wait(timeout: .now() + openFileScanTimeoutSeconds) == .timedOut {
             process.terminate()
             _ = semaphore.wait(timeout: .now() + 0.2)
-            return [:]
+            return runningOpenRolloutFilesOneByOne(for: processIDs)
         }
 
         let data = (try? Data(contentsOf: outputURL)) ?? Data()
@@ -633,9 +648,65 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
 
         let parsed = parseOpenRolloutFiles(from: output)
         if process.terminationStatus != 0, parsed.isEmpty {
-            return [:]
+            return runningOpenRolloutFilesOneByOne(for: processIDs)
         }
-        return parsed
+        guard parsed.count < processIDs.count else {
+            return parsed
+        }
+
+        return parsed.merging(
+            runningOpenRolloutFilesOneByOne(for: processIDs.filter { parsed[$0] == nil })
+        ) { current, _ in current }
+    }
+
+    private static func runningOpenRolloutFilesOneByOne(for processIDs: [Int]) -> [Int: String] {
+        var filesByPID: [Int: String] = [:]
+
+        for processID in processIDs {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            process.arguments = ["-nP", "-p", String(processID)]
+
+            let outputURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("codex-agent-runtime-signal-lsof-\(processID)-\(UUID().uuidString).txt")
+            guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+                  let outputHandle = try? FileHandle(forWritingTo: outputURL)
+            else {
+                continue
+            }
+            defer {
+                try? outputHandle.close()
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+
+            process.standardOutput = outputHandle
+            process.standardError = Pipe()
+
+            do {
+                try process.run()
+            } catch {
+                continue
+            }
+
+            let semaphore = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in
+                semaphore.signal()
+            }
+
+            if semaphore.wait(timeout: .now() + openFileScanTimeoutSeconds) == .timedOut {
+                process.terminate()
+                _ = semaphore.wait(timeout: .now() + 0.2)
+                continue
+            }
+
+            let data = (try? Data(contentsOf: outputURL)) ?? Data()
+            guard let output = String(data: data, encoding: .utf8) else { continue }
+            if let rolloutFile = parseOpenRolloutFiles(from: output)[processID] {
+                filesByPID[processID] = rolloutFile
+            }
+        }
+
+        return filesByPID
     }
 
     static func parseOpenRolloutFiles(from output: String) -> [Int: String] {
@@ -829,7 +900,7 @@ private extension CodexPlatformPresenceMonitor.RunningProcessInfo {
     }
 
     var looksLikeOpenCodexSessionProcess: Bool {
-        looksLikeCodexCLI || looksLikeCodexAppServer
+        looksLikeCodexExecutable || looksLikeCodexAppServer
     }
 
     var looksLikeComputerUseTurnEndedProcess: Bool {
@@ -837,5 +908,42 @@ private extension CodexPlatformPresenceMonitor.RunningProcessInfo {
         return commandLine.contains("skycomputeruseclient")
             && commandLine.contains("turn-ended")
             && commandLine.contains("\"thread-id\"")
+    }
+
+    var canHoldOpenCodexRolloutFile: Bool {
+        let commandName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+        let firstArgumentName = arguments
+            .split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map { URL(fileURLWithPath: String($0)).lastPathComponent.lowercased() }
+        let commandLine = commandLine
+
+        return commandName == "codex"
+            || commandName == "codex-acp"
+            || firstArgumentName == "codex"
+            || firstArgumentName == "codex-acp"
+            || commandLine.contains("/bin/codex ")
+            || commandLine.contains("/@openai/codex/")
+            || commandLine.contains("/codex-acp")
+    }
+
+    private var looksLikeCodexExecutable: Bool {
+        let commandName = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+        let commandLine = commandLine
+        let firstArgumentName = arguments
+            .split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map { URL(fileURLWithPath: String($0)).lastPathComponent.lowercased() }
+
+        return commandName == "codex"
+            || commandName == "codex-acp"
+            || firstArgumentName == "codex"
+            || firstArgumentName == "codex-acp"
+            || commandLine == "codex"
+            || commandLine.hasPrefix("codex ")
+            || commandLine.contains("/codex-acp")
+            || commandLine.contains("/bin/codex ")
+            || commandLine.contains("/node_modules/.bin/codex")
+            || commandLine.contains("/@openai/codex/")
     }
 }

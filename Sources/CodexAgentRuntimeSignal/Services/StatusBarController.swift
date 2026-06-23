@@ -365,7 +365,7 @@ final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, NS
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        model.reload()
+        model.reloadSynchronouslyForUserInteraction()
         rebuildNativeStatusMenu(menu)
     }
 
@@ -728,7 +728,7 @@ final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, NS
     private func showPopover() {
         guard let button = statusItem?.button else { return }
 
-        model.reload()
+        model.reloadSynchronouslyForUserInteraction()
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false

@@ -102,13 +102,11 @@ enum ActivityPresentation {
             sessions.append(session)
         }
 
-        let sortedSessions = sessions.sorted(by: stableSessionSortPrecedes)
-
         if let limit {
-            return Array(sortedSessions.prefix(limit))
+            return Array(sessions.prefix(limit))
         }
 
-        return sortedSessions
+        return sessions
     }
 
     static func visibleRunningSessions(
@@ -195,12 +193,24 @@ enum ActivityPresentation {
             return "recent:\(activitySourceKey(for: session))"
         }
 
+        if let threadID = CodexThreadNameIndex.threadID(from: session.sessionID) {
+            let agentName = normalizedAgentName(session.agent)
+            let sessionName = session.sessionID.lowercased()
+            if agentName.hasPrefix("codex")
+                || sessionName.hasPrefix("codex-")
+                || sessionName.hasPrefix("codex:") {
+                return "codex:thread:\(threadID)"
+            }
+            if agentName.hasPrefix("claude")
+                || sessionName.hasPrefix("claude-")
+                || sessionName.hasPrefix("claude:") {
+                return "claude:thread:\(threadID)"
+            }
+        }
+
         let agentKey = normalizedAgentKey(session.agent, fallback: session.sessionID)
         switch agentKey {
         case "codex", "claude":
-            if let threadID = CodexThreadNameIndex.threadID(from: session.sessionID) {
-                return "\(agentKey):thread:\(threadID)"
-            }
             return "\(agentKey):\(activitySourceKey(for: session))"
         default:
             return "\(activitySourceKey(for: session)):\(session.sessionID)"
@@ -303,7 +313,7 @@ enum ActivityPresentation {
                 return "IDEA"
             }
             if containsAny(agent, sessionID, event, tokens: ["jetbrains"]) {
-                return "JetBrains"
+                return "IDEA"
             }
             if containsAny(agent, sessionID, event, tokens: ["vscode", "vs-code", "visual-studio-code"]) {
                 return "VS Code"
@@ -596,7 +606,7 @@ extension MenuBarStatusModel {
     func activitySessionSourceTitle(for session: SessionStatus) -> String {
         if ActivityPresentation.isCodexActivity(session),
            let hostApplicationName = codexThreadNameResolver.hostApplicationName(for: session.sessionID) {
-            return hostApplicationName
+            return normalizedActivityHostApplicationName(hostApplicationName)
         }
         if ActivityPresentation.isCodexActivity(session),
            let sourceDetail = ActivityPresentation.sourceDetail(for: session) {
@@ -618,6 +628,23 @@ extension MenuBarStatusModel {
             return ActivityPresentation.sourceDetail(for: session) ?? "IDE"
         case .local:
             return friendlyAgentName(session.agent)
+        }
+    }
+
+    private func normalizedActivityHostApplicationName(_ hostApplicationName: String) -> String {
+        let normalized = hostApplicationName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+
+        switch normalized {
+        case "jetbrains", "intellij", "intellij-idea":
+            return "IDEA"
+        case "vscode", "vs-code", "visual-studio-code":
+            return "VS Code"
+        default:
+            return hostApplicationName
         }
     }
 
