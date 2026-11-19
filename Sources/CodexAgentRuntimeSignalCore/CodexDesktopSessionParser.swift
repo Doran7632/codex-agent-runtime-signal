@@ -197,11 +197,49 @@ private extension CodexDesktopSessionParser {
     }
 
     static func toolCallSignal(_ payload: [String: Any]) -> RuntimeSignal {
+        if isPermissionRequestToolCall(payload) {
+            return .permissionRequest
+        }
+
         let name = toolName(in: payload).lowercased()
         if name == "request_user_input" {
             return .attention
         }
         return .working
+    }
+
+    static func isPermissionRequestToolCall(_ payload: [String: Any]) -> Bool {
+        if boolValue(in: payload, keys: ["requires_approval", "requiresApproval", "approval_required", "approvalRequired"]) == true {
+            return true
+        }
+
+        guard let arguments = argumentsObject(in: payload) else { return false }
+        if let sandboxPermissions = stringValue(
+            in: arguments,
+            keys: ["sandbox_permissions", "sandboxPermissions"]
+        )?.lowercased(),
+           sandboxPermissions == "require_escalated" || sandboxPermissions == "requires_escalated" {
+            return true
+        }
+
+        return boolValue(
+            in: arguments,
+            keys: ["requires_approval", "requiresApproval", "approval_required", "approvalRequired"]
+        ) == true
+    }
+
+    static func argumentsObject(in payload: [String: Any]) -> [String: Any]? {
+        if let arguments = payload["arguments"] as? [String: Any] {
+            return arguments
+        }
+
+        guard let rawArguments = payload["arguments"] as? String,
+              let data = rawArguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return object
     }
 
     static func toolName(in payload: [String: Any]) -> String {
@@ -292,6 +330,25 @@ private extension CodexDesktopSessionParser {
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     return trimmed
+                }
+            }
+        }
+        return nil
+    }
+
+    static func boolValue(in payload: [String: Any], keys: [String]) -> Bool? {
+        for key in keys {
+            if let value = payload[key] as? Bool {
+                return value
+            }
+            if let value = payload[key] as? String {
+                switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "true", "yes", "1":
+                    return true
+                case "false", "no", "0":
+                    return false
+                default:
+                    continue
                 }
             }
         }

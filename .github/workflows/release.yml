@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release artifacts
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: |
+          DEVELOPER_DIR_PATH=""
+          if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+            DEVELOPER_DIR_PATH="/Applications/Xcode.app/Contents/Developer"
+          else
+            DEVELOPER_DIR_PATH="$(ls -d /Applications/Xcode_*.app/Contents/Developer 2>/dev/null | sort | tail -n 1 || true)"
+          fi
+          if [ -n "$DEVELOPER_DIR_PATH" ]; then
+            sudo xcode-select -s "$DEVELOPER_DIR_PATH"
+            echo "Selected Xcode at $DEVELOPER_DIR_PATH"
+          else
+            echo "No Xcode.app bundle found; using current developer directory."
+          fi
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Build products
+        run: |
+          swift build --product CodexAgentRuntimeSignal
+          swift build --product codex-agent-runtime-signal
+          swift build --product codex-agent-runtime-signal-checks
+          swift build --product codex-agent-runtime-signal-icon-preview
+
+      - name: Package release
+        run: ./script/package_release.sh
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+
+      - name: Verify release artifacts
+        run: ./script/verify_release_all.sh --skip-package
+
+      - name: Prepare release notes
+        run: |
+          NOTES_FILE="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            cp "$NOTES_FILE" dist/release-notes.md
+          else
+            {
+              echo "# codex-agent-runtime-signal ${GITHUB_REF_NAME}"
+              echo
+              echo "## English"
+              echo
+              echo "### Highlights"
+              echo
+              echo "- Maintenance release for codex-agent-runtime-signal."
+              echo
+              echo "### Release verification"
+              echo
+              echo "- GitHub Actions built the app, ran Swift tests, packaged the release, and verified SHA-256 checksums."
+              echo "- Checksums are published in CodexAgentRuntimeSignal-SHA256SUMS.txt."
+              echo "- This is a local/self-use macOS build. It is ad-hoc signed and not notarized."
+              echo
+              echo "## 简体中文"
+              echo
+              echo "### 亮点"
+              echo
+              echo "- codex-agent-runtime-signal 维护版本。"
+              echo
+              echo "### 发布验证"
+              echo
+              echo "- GitHub Actions 已完成 App 构建、Swift 测试、发布打包和 SHA-256 校验。"
+              echo "- 校验值见 CodexAgentRuntimeSignal-SHA256SUMS.txt。"
+              echo "- 这是本地 / 自用 macOS 构建，使用 ad-hoc 签名，尚未进行 notarization 公证。"
+            } > dist/release-notes.md
+          fi
+
+      - name: Verify checksums
+        run: shasum -a 256 -c dist/CodexAgentRuntimeSignal-SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: codex-agent-runtime-signal ${{ github.ref_name }}
+          body_path: dist/release-notes.md
+          files: |
+            dist/CodexAgentRuntimeSignal.zip
+            dist/CodexAgentRuntimeSignal.dmg
+            dist/appcast.xml
+            dist/CodexAgentRuntimeSignal-release-manifest.json
+            dist/CodexAgentRuntimeSignal-SHA256SUMS.txt

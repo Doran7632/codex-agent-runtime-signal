@@ -48,6 +48,10 @@ cleanup_duplicate_artifacts() {
 
 cleanup_duplicate_artifacts
 
+if [[ "${1:-}" == "--manual" ]]; then
+  export SPARKLE_PUBLIC_ED_KEY=""
+fi
+
 APP_BUNDLE="$("$ROOT_DIR/script/package_app.sh" --release)"
 "$ROOT_DIR/script/install_cli.sh" >/dev/null
 swift_tool build -c release --product codex-agent-runtime-signal-icon-preview >/dev/null
@@ -111,6 +115,10 @@ rm -f "$ARCHIVE" "$DMG" "$APPCAST" "$CHECKSUMS" "$MANIFEST"
 )
 
 "$ROOT_DIR/script/package_dmg.sh" --use-existing-app --output "$DMG" >/dev/null
+if [[ "${1:-}" == "--manual" ]]; then
+  (cd "$DIST_DIR" && shasum -a 256 "${RELEASE_BASENAME}.zip" "${RELEASE_BASENAME}.dmg") >"$CHECKSUMS"
+  exit 0
+fi
 "$ROOT_DIR/script/generate_appcast.sh" >/dev/null
 
 /usr/bin/python3 - "$ROOT_DIR" "$APP_NAME" "$APP_BUNDLE" "$ARCHIVE" "$DMG" "$APPCAST" "$MANIFEST" <<'PY'

@@ -9,8 +9,8 @@ struct GitHubUpdateCheckResult: Equatable, Sendable {
 }
 
 struct GitHubReleaseUpdateChecker: Sendable {
-    static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/guan-ops/codex-agent-runtime-signal/releases/latest")!
-    static let fallbackReleasePageURL = URL(string: "https://github.com/guan-ops/codex-agent-runtime-signal/releases/latest")!
+    static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/Doran7632/codex-agent-runtime-signal/releases/latest")!
+    static let fallbackReleasePageURL = URL(string: "https://github.com/Doran7632/codex-agent-runtime-signal/releases/latest")!
 
     var session: URLSessionProtocol = URLSession.shared
     var apiURL: URL = Self.latestReleaseAPIURL
@@ -78,7 +78,7 @@ struct GitHubReleaseUpdateChecker: Sendable {
 
         let latestVersion = Self.displayVersion(from: tagName)
         let comparison = Self.compareVersions(latestVersion, currentVersion)
-        let releasePageURL = URL(string: "https://github.com/guan-ops/codex-agent-runtime-signal/releases/tag/\(tagName)") ?? finalURL
+        let releasePageURL = URL(string: "https://github.com/Doran7632/codex-agent-runtime-signal/releases/tag/\(tagName)") ?? finalURL
 
         return GitHubUpdateCheckResult(
             currentVersion: currentVersion,
@@ -147,7 +147,7 @@ struct GitHubReleaseUpdateChecker: Sendable {
             return nil
         }
 
-        let pattern = #"/guan-ops/codex-agent-runtime-signal/releases/tag/([^"?#/]+)"#
+        let pattern = #"/Doran7632/codex-agent-runtime-signal/releases/tag/([^"?#/]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return nil
         }

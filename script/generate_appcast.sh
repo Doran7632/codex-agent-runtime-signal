@@ -38,8 +38,8 @@ if [[ ! "$TAG_NAME" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
   TAG_NAME="v$APP_VERSION"
 fi
 
-DOWNLOAD_URL_PREFIX="${SPARKLE_DOWNLOAD_URL_PREFIX:-https://github.com/guan-ops/codex-agent-runtime-signal/releases/download/$TAG_NAME/}"
-FULL_RELEASE_NOTES_URL="${SPARKLE_FULL_RELEASE_NOTES_URL:-https://github.com/guan-ops/codex-agent-runtime-signal/releases/tag/$TAG_NAME}"
+DOWNLOAD_URL_PREFIX="${SPARKLE_DOWNLOAD_URL_PREFIX:-https://github.com/Doran7632/codex-agent-runtime-signal/releases/download/$TAG_NAME/}"
+FULL_RELEASE_NOTES_URL="${SPARKLE_FULL_RELEASE_NOTES_URL:-https://github.com/Doran7632/codex-agent-runtime-signal/releases/tag/$TAG_NAME}"
 ARCHIVE_DIR="$(mktemp -d)"
 trap 'rm -rf "$ARCHIVE_DIR"' EXIT
 

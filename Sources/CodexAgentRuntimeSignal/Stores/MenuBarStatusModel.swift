@@ -261,8 +261,8 @@ struct RuntimeTimingProfile: Equatable {
         animationTickTolerance: 0.3,
         agentPollInterval: 10.0,
         agentPollTolerance: 3.0,
-        desktopAppPresencePollInterval: 60.0,
-        desktopAppPresencePollTolerance: 15.0,
+        desktopAppPresencePollInterval: 30.0,
+        desktopAppPresencePollTolerance: 8.0,
         automaticUpdateCheckTimerInterval: 60 * 60,
         automaticUpdateCheckTimerTolerance: 5 * 60
     )
@@ -274,8 +274,8 @@ struct RuntimeTimingProfile: Equatable {
         animationTickTolerance: 0.5,
         agentPollInterval: 20.0,
         agentPollTolerance: 6.0,
-        desktopAppPresencePollInterval: 120.0,
-        desktopAppPresencePollTolerance: 30.0,
+        desktopAppPresencePollInterval: 60.0,
+        desktopAppPresencePollTolerance: 15.0,
         automaticUpdateCheckTimerInterval: 60 * 60,
         automaticUpdateCheckTimerTolerance: 5 * 60
     )
@@ -345,6 +345,7 @@ final class MenuBarStatusModel: ObservableObject {
     private let codexDesktopActivityMonitor: CodexDesktopActivityMonitor
     private let codexPlatformPresenceMonitor: CodexPlatformPresenceMonitor
     let codexThreadNameResolver: CodexThreadNameResolving
+    let claudeThreadNameResolver: CodexThreadNameResolving
     private let updateChecker: GitHubReleaseUpdateChecker
     private let stateReloadQueue = DispatchQueue(label: "com.codexagentruntimesignal.state-reload")
     private let codexDesktopPollQueue = DispatchQueue(label: "com.codexagentruntimesignal.codex-desktop-poll")
@@ -360,6 +361,7 @@ final class MenuBarStatusModel: ObservableObject {
     private static let recentActivityFallbackWindow: TimeInterval = 5 * 60
     private static let desktopPresenceSuppressionWindow: TimeInterval = 5 * 60
     private static let openCodexSessionRetentionWindow: TimeInterval = 10 * 60
+    private static let openClaudeSessionRetentionWindow: TimeInterval = 90
     private static let passiveActiveDisplayWindow: TimeInterval = 45
     private static let combinedDisplaySessionsCacheTTL: TimeInterval = 1
     private var statusLightSequence: [StatusLightOverrideFrame] = []
@@ -372,6 +374,8 @@ final class MenuBarStatusModel: ObservableObject {
     private var isAutomaticUpdateCheckInFlight = false
     private var retainedOpenCodexSessionsByID: [String: SessionStatus] = [:]
     private var retainedOpenCodexSessionSeenAtByID: [String: Date] = [:]
+    private var retainedOpenClaudeSessionsByID: [String: SessionStatus] = [:]
+    private var retainedOpenClaudeSessionSeenAtByID: [String: Date] = [:]
     private var stableSessionOrderByIdentityKey: [String: Int] = [:]
     private var nextStableSessionOrder = 0
     private var cachedCombinedDisplaySessions: CombinedDisplaySessionsCache?
@@ -423,6 +427,7 @@ final class MenuBarStatusModel: ObservableObject {
         codexDesktopActivityMonitor: CodexDesktopActivityMonitor = CodexDesktopActivityMonitor(),
         codexPlatformPresenceMonitor: CodexPlatformPresenceMonitor = CodexPlatformPresenceMonitor(),
         codexThreadNameResolver: CodexThreadNameResolving = CodexThreadNameIndex(),
+        claudeThreadNameResolver: CodexThreadNameResolving = ClaudeThreadNameIndex(),
         updateChecker: GitHubReleaseUpdateChecker = GitHubReleaseUpdateChecker()
     ) {
         self.store = store
@@ -432,6 +437,7 @@ final class MenuBarStatusModel: ObservableObject {
         self.codexDesktopActivityMonitor = codexDesktopActivityMonitor
         self.codexPlatformPresenceMonitor = codexPlatformPresenceMonitor
         self.codexThreadNameResolver = codexThreadNameResolver
+        self.claudeThreadNameResolver = claudeThreadNameResolver
         self.updateChecker = updateChecker
         let storedLayout = UserDefaults.standard.string(forKey: "trafficSignalLayout")
         let storedStyle = UserDefaults.standard.string(forKey: "trafficSignalStyle")
@@ -948,7 +954,8 @@ final class MenuBarStatusModel: ObservableObject {
             aggregate: aggregateForRuntimeSignalScopes(
                 sessions: deduplicatedSessions,
                 fallback: snapshot.aggregate,
-                scopes: displayScopes
+                scopes: displayScopes,
+                now: now
             ),
             sessions: deduplicatedSessions,
             recentEvents: deduplicatedRecentEvents,
@@ -1850,8 +1857,28 @@ final class MenuBarStatusModel: ObservableObject {
                 && now.timeIntervalSince(seenAt) <= Self.openCodexSessionRetentionWindow
         }
 
+        // claude 对称 retain：discovery 漏报时短时保活；窗口 90s（pid 检测修后可靠，仅防极端，exit 后 ≤90s 消除）。
+        let currentOpenClaudeSessions = sessions.filter(ActivityPresentation.isOpenClaudeSession)
+        let currentOpenClaudeSessionIDs = Set(currentOpenClaudeSessions.map(\.sessionID))
+
+        for session in currentOpenClaudeSessions {
+            retainedOpenClaudeSessionsByID[session.sessionID] = session
+            retainedOpenClaudeSessionSeenAtByID[session.sessionID] = now
+        }
+
+        retainedOpenClaudeSessionsByID = retainedOpenClaudeSessionsByID.filter { sessionID, _ in
+            guard let seenAt = retainedOpenClaudeSessionSeenAtByID[sessionID] else { return false }
+            return now.timeIntervalSince(seenAt) <= Self.openClaudeSessionRetentionWindow
+        }
+        retainedOpenClaudeSessionSeenAtByID = retainedOpenClaudeSessionSeenAtByID.filter { sessionID, seenAt in
+            retainedOpenClaudeSessionsByID[sessionID] != nil
+                && now.timeIntervalSince(seenAt) <= Self.openClaudeSessionRetentionWindow
+        }
+
         let retainedSessions = retainedOpenCodexSessionsByID.values.filter { session in
             !currentOpenCodexSessionIDs.contains(session.sessionID)
+        } + retainedOpenClaudeSessionsByID.values.filter { session in
+            !currentOpenClaudeSessionIDs.contains(session.sessionID)
         }
 
         return (sessions + retainedSessions).sorted(by: ActivityPresentation.stableSessionSortPrecedes)
@@ -1860,6 +1887,8 @@ final class MenuBarStatusModel: ObservableObject {
     func clearRetainedOpenCodexSessions() {
         retainedOpenCodexSessionsByID = [:]
         retainedOpenCodexSessionSeenAtByID = [:]
+        retainedOpenClaudeSessionsByID = [:]
+        retainedOpenClaudeSessionSeenAtByID = [:]
     }
 
     func clearStableSessionOrderForTesting() {
@@ -1924,7 +1953,12 @@ final class MenuBarStatusModel: ObservableObject {
             sessions.append(desktopSession)
         }
 
-        let sortedSessions = sortSessionsByStableListOrder(sessions)
+        // 过滤已退出 claude：hook 上报但 ~/.claude/sessions/<pid>.json 已不存在的会话不显示（discovery 的活会话和 hook 的活会话保留）。
+        let liveFilteredSessions = sessions.filter { session in
+            guard ActivityPresentation.isClaudeActivity(session) else { return true }
+            return claudeThreadNameResolver.isLiveSession(for: session.sessionID)
+        }
+        let sortedSessions = sortSessionsByStableListOrder(liveFilteredSessions)
         cachedCombinedDisplaySessions = CombinedDisplaySessionsCache(
             snapshot: snapshot,
             desktopAppSessions: desktopAppSessions,
@@ -2019,6 +2053,11 @@ final class MenuBarStatusModel: ObservableObject {
                 continue
             }
 
+            if let merged = Self.mergedDiscoveredClaudeSession(session, with: current, now: now) {
+                sessionsByID[sessionKey] = merged
+                continue
+            }
+
             if Self.shouldPreferDisplaySession(session, over: current) {
                 sessionsByID[sessionKey] = session
             }
@@ -2099,9 +2138,65 @@ final class MenuBarStatusModel: ObservableObject {
         return activitySession
     }
 
+    // 对称 codex 的合并：claude discovery idle 会话 + hook 活动事件同 thread 时，
+    // 用 discovery 的宿主（父链推断）+ hook 的实时状态，避免 hook 的 claude-cli 把 IDEA/VS Code 宿主盖掉。
+    private static func mergedDiscoveredClaudeSession(
+        _ candidate: SessionStatus,
+        with current: SessionStatus,
+        now: Date
+    ) -> SessionStatus? {
+        let discoveredSession: SessionStatus
+        let activitySession: SessionStatus
+
+        if ActivityPresentation.isDiscoveredClaudeIdleSession(candidate) {
+            discoveredSession = candidate
+            activitySession = current
+        } else if ActivityPresentation.isDiscoveredClaudeIdleSession(current) {
+            discoveredSession = current
+            activitySession = candidate
+        } else {
+            return nil
+        }
+
+        guard ActivityPresentation.activitySessionIdentityKey(for: discoveredSession)
+            == ActivityPresentation.activitySessionIdentityKey(for: activitySession)
+        else {
+            return nil
+        }
+
+        if activitySession.signal.displayState == .active,
+           isCurrentlyRunning(activitySession, now: now) {
+            return SessionStatus(
+                sessionID: discoveredSession.sessionID,
+                signal: activitySession.signal,
+                updatedAt: activitySession.updatedAt,
+                agent: discoveredSession.agent,
+                lastEvent: activitySession.lastEvent
+            )
+        }
+
+        if activitySession.signal.displayState == .ready
+            || activitySession.signal.displayState == .completed
+            || !isCurrentlyRunning(activitySession, now: now) {
+            return discoveredSession
+        }
+
+        return activitySession
+    }
+
     private static func isCurrentlyRunning(_ session: SessionStatus, now: Date) -> Bool {
         guard session.signal.displayState == .active else { return false }
         return now.timeIntervalSince(session.updatedAt) <= activeDisplayWindow(for: session)
+    }
+
+    /// 与 isVisibleSession 一致：过期的 active（updatedAt 超出 activeDisplayWindow）降级为 idle，
+    /// 避免 aggregate（绿灯）把已退出/残留的 working session 算成 active，与列表（visibleSessions）不一致。
+    private static func effectiveAggregateSignal(_ session: SessionStatus, now: Date) -> RuntimeSignal {
+        if session.signal.displayState == .active,
+           !isCurrentlyRunning(session, now: now) {
+            return .idle
+        }
+        return session.signal
     }
 
     private static func displaySessionSortPrecedes(_ lhs: SessionStatus, _ rhs: SessionStatus) -> Bool {
@@ -2453,11 +2548,12 @@ final class MenuBarStatusModel: ObservableObject {
     private func aggregateForRuntimeSignalScopes(
         sessions: [SessionStatus],
         fallback: RuntimeSignal,
-        scopes: Set<RuntimeSignalAgentScope>
+        scopes: Set<RuntimeSignalAgentScope>,
+        now: Date = Date()
     ) -> RuntimeSignal {
         let selectedSignals = sessions.compactMap { session -> RuntimeSignal? in
             guard Self.session(session, matches: scopes) else { return nil }
-            return session.signal
+            return Self.effectiveAggregateSignal(session, now: now)
         }
 
         if let aggregate = selectedSignals
@@ -2471,10 +2567,11 @@ final class MenuBarStatusModel: ObservableObject {
 
     private func aggregateForSessions(
         _ sessions: [SessionStatus],
-        fallback: RuntimeSignal
+        fallback: RuntimeSignal,
+        now: Date = Date()
     ) -> RuntimeSignal {
-        if let aggregate = sessions
-            .map(\.signal)
+        let effectiveSignals = sessions.map { Self.effectiveAggregateSignal($0, now: now) }
+        if let aggregate = effectiveSignals
             .max(by: { lhs, rhs in lhs.displayState.priority < rhs.displayState.priority })?
             .normalizedAggregateSignal {
             return aggregate

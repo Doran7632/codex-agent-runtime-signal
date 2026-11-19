@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Swift tests
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          DEVELOPER_DIR_PATH=""
+          if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+            DEVELOPER_DIR_PATH="/Applications/Xcode.app/Contents/Developer"
+          else
+            DEVELOPER_DIR_PATH="$(ls -d /Applications/Xcode_*.app/Contents/Developer 2>/dev/null | sort | tail -n 1 || true)"
+          fi
+          if [ -n "$DEVELOPER_DIR_PATH" ]; then
+            sudo xcode-select -s "$DEVELOPER_DIR_PATH"
+            echo "Selected Xcode at $DEVELOPER_DIR_PATH"
+          else
+            echo "No Xcode.app bundle found; using current developer directory."
+          fi
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Check shell scripts
+        run: |
+          bash -n script/*.sh
+          bash -n scripts/codex-agent-runtime-signal
+          bash -n scripts/codex-agent-runtime-signal-run
+          bash -n scripts/codex-signal-hook
+          bash -n scripts/claude-code-signal-hook
+          bash -n scripts/generic-codex-agent-runtime-signal-hook
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Build products
+        run: |
+          swift build --product CodexAgentRuntimeSignal
+          swift build --product codex-agent-runtime-signal
+          swift build --product codex-agent-runtime-signal-checks
+          swift build --product codex-agent-runtime-signal-icon-preview
+
+      - name: Verify local integrations
+        run: ./script/verify_local_integrations.sh

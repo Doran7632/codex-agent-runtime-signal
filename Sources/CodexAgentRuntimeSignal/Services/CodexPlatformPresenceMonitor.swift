@@ -3,20 +3,6 @@ import AppKit
 import Foundation
 
 final class CodexPlatformPresenceMonitor: @unchecked Sendable {
-    private struct ComputerUseTurnRecord: Decodable {
-        let threadID: String
-        let cwd: String?
-        let client: String?
-        let inputMessages: [String]?
-
-        private enum CodingKeys: String, CodingKey {
-            case threadID = "thread-id"
-            case cwd
-            case client
-            case inputMessages = "input-messages"
-        }
-    }
-
     struct RunningApplicationInfo: Equatable, Sendable {
         let bundleIdentifier: String?
         let localizedName: String?
@@ -88,7 +74,8 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
     static func detectSessions(
         applications: [RunningApplicationInfo],
         processes: [RunningProcessInfo],
-        now: Date = Date()
+        now: Date = Date(),
+        claudeSessionsRoot: URL? = nil
     ) -> [SessionStatus] {
         definitions.compactMap { definition in
             let isRunning =
@@ -104,6 +91,7 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
                 lastEvent: definition.event
             )
         } + detectOpenCodexSessions(processes: processes, now: now)
+            + detectOpenClaudeSessions(now: now, sessionsRoot: claudeSessionsRoot)
     }
 
     private static let definitions: [PlatformDefinition] = [
@@ -513,49 +501,6 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         }
     }
 
-    private static func detectComputerUseOpenCodexSessions(
-        processes: [RunningProcessInfo],
-        now: Date
-    ) -> [SessionStatus] {
-        var latestOpenDesignSession: (pid: Int, session: SessionStatus)?
-
-        for process in processes where process.looksLikeComputerUseTurnEndedProcess {
-            guard let record = computerUseTurnRecord(in: process.arguments),
-                  !isSyntheticComputerUseTurn(record),
-                  isOpenDesignComputerUseTurn(record),
-                  let pid = process.pid
-            else {
-                continue
-            }
-
-            let session = SessionStatus(
-                sessionID: "codex-cli:\(record.threadID)",
-                signal: .idle,
-                updatedAt: now,
-                agent: "codex-cli",
-                lastEvent: "CodexSessionOpen"
-            )
-            if let current = latestOpenDesignSession,
-               current.pid > pid {
-                continue
-            }
-            latestOpenDesignSession = (pid, session)
-        }
-
-        if let latestOpenDesignSession {
-            return [latestOpenDesignSession.session]
-        }
-        return []
-    }
-
-    private static func isOpenDesignComputerUseTurn(_ record: ComputerUseTurnRecord) -> Bool {
-        let combined = [record.client, record.cwd]
-            .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
-
-        return containsAny(combined, tokens: ["open design", "opendesign", "codex_exec"])
-    }
-
     private static func mergeDiscoveredSessions(_ sessions: [SessionStatus]) -> [SessionStatus] {
         var sessionsByThreadID: [String: SessionStatus] = [:]
 
@@ -578,25 +523,6 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
             return $0.sessionID < $1.sessionID
         }
     }
-
-    private static func computerUseTurnRecord(in arguments: String) -> ComputerUseTurnRecord? {
-        guard let jsonStart = arguments.range(of: "{")?.lowerBound else { return nil }
-        let json = String(arguments[jsonStart...])
-        guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(ComputerUseTurnRecord.self, from: data)
-    }
-
-    private static func isSyntheticComputerUseTurn(_ record: ComputerUseTurnRecord) -> Bool {
-        guard let firstMessage = record.inputMessages?.first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        else {
-            return false
-        }
-
-        return firstMessage.hasPrefix("you are a memory extractor")
-    }
-
 
     private static func runningOpenRolloutFiles(for processIDs: [Int]) -> [Int: String] {
         let process = Process()
@@ -787,6 +713,133 @@ final class CodexPlatformPresenceMonitor: @unchecked Sendable {
         return "codex-cli"
     }
 
+    // MARK: - Claude Code discovery（对称 codex；数据源是 ~/.claude/sessions/<pid>.json）
+
+    private static func inferredClaudeAgent(
+        for process: RunningProcessInfo,
+        processByPID: [Int: RunningProcessInfo]
+    ) -> String {
+        let ancestry = processAncestry(for: process, processByPID: processByPID)
+            .map(\.commandLine)
+            .joined(separator: " ")
+
+        if containsAny(ancestry, tokens: ["intellij idea.app", "idea.app", "jetbrains", "intellij"]) {
+            return "claude-idea"
+        }
+        if containsAny(ancestry, tokens: [
+            "visual studio code.app",
+            "code helper",
+            ".vscode",
+            "vscode"
+        ]) {
+            return "claude-vscode"
+        }
+        if containsAny(ancestry, tokens: ["xcode.app", "codingassistant"]) {
+            return "claude-xcode"
+        }
+        if containsAny(ancestry, tokens: ["obsidian.app", "obsidian helper", "application support/obsidian"]) {
+            return "claude-obsidian"
+        }
+        if containsAny(ancestry, tokens: ["/applications/claude.app/", "claude desktop"]) {
+            return "claude-desktop"
+        }
+        return "claude-cli"
+    }
+
+    private struct OpenClaudeSessionRecord: Decodable {
+        let pid: Int?
+        let sessionId: String?
+        let status: String?
+        let name: String?
+    }
+
+    static func detectOpenClaudeSessions(now: Date, sessionsRoot: URL? = nil) -> [SessionStatus] {
+        let records = openClaudeSessionRecords(sessionsRoot: sessionsRoot)
+        guard !records.isEmpty else { return [] }
+
+        let pids = Set(records.compactMap { $0.pid })
+        // pid 存活用轻量 kill(pid,0) 判定（零 fork、无超时、不依赖父链），避免高负载 ps 超时漏报活会话。
+        let livePIDs = Set(pids.filter { Self.isProcessAlive($0) })
+        // 父链推断 best-effort：claudeProcessGraph 拿到多少用多少；缺失时宿主降级 claude-cli（不影响显示）。
+        let processByPID = claudeProcessGraph(for: livePIDs)
+
+        var sessionsBySessionID: [String: SessionStatus] = [:]
+        for record in records {
+            guard let pid = record.pid,
+                  livePIDs.contains(pid),
+                  let sessionId = record.sessionId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !sessionId.isEmpty
+            else { continue }
+
+            // 父链可能因 ps 超时未追到；宿主推断失败时 fallback claude-cli，不丢会话。
+            let agent = processByPID[pid]
+                .map { inferredClaudeAgent(for: $0, processByPID: processByPID) }
+                ?? "claude-cli"
+            // 初始信号用 sessions/<pid>.json 的 status；实时运行信号仍由 claude-hook 链路覆盖。
+            sessionsBySessionID[sessionId] = SessionStatus(
+                sessionID: "\(agent):\(sessionId)",
+                signal: (record.status?.lowercased() == "busy") ? .working : .idle,
+                updatedAt: now,
+                agent: agent,
+                lastEvent: "ClaudeSessionOpen"
+            )
+        }
+
+        return sessionsBySessionID.values.sorted {
+            if $0.updatedAt != $1.updatedAt {
+                return $0.updatedAt > $1.updatedAt
+            }
+            return $0.sessionID < $1.sessionID
+        }
+    }
+
+    private static func claudeProcessGraph(for pids: Set<Int>) -> [Int: RunningProcessInfo] {
+        var requested = pids
+        var byPID: [Int: RunningProcessInfo] = [:]
+        for _ in 0..<16 {
+            let missing = requested.subtracting(byPID.keys)
+            guard !missing.isEmpty else { break }
+            let details = processDetails(for: missing)
+            guard !details.isEmpty else { break }
+            for process in details {
+                guard let pid = process.pid else { continue }
+                byPID[pid] = process
+                if let ppid = process.ppid, ppid > 1 {
+                    requested.insert(ppid)
+                }
+            }
+        }
+        return byPID
+    }
+
+    /// 轻量进程存活检查：kill(pid, 0) 不发信号，仅探测 pid 是否存在。零 fork、无超时。
+    /// 进程存在但无权限发信号时 errno==EPERM，也视为存活。
+    private static func isProcessAlive(_ pid: Int) -> Bool {
+        if kill(pid_t(pid), 0) == 0 { return true }
+        return errno == EPERM
+    }
+
+    private static func openClaudeSessionRecords(sessionsRoot: URL?) -> [OpenClaudeSessionRecord] {
+        let root = sessionsRoot ?? ClaudeThreadNameIndex.defaultClaudeSessionsRootURL()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        let decoder = JSONDecoder()
+        var records: [OpenClaudeSessionRecord] = []
+        for file in files where file.pathExtension == "json" {
+            // 文件名是 <pid>.json，只接受纯数字名
+            guard file.deletingPathExtension().lastPathComponent.allSatisfy(\.isNumber),
+                  let data = try? Data(contentsOf: file),
+                  let record = try? decoder.decode(OpenClaudeSessionRecord.self, from: data)
+            else { continue }
+            records.append(record)
+        }
+        return records
+    }
+
     private static func processAncestry(
         for process: RunningProcessInfo,
         processByPID: [Int: RunningProcessInfo]
@@ -901,13 +954,6 @@ private extension CodexPlatformPresenceMonitor.RunningProcessInfo {
 
     var looksLikeOpenCodexSessionProcess: Bool {
         looksLikeCodexExecutable || looksLikeCodexAppServer
-    }
-
-    var looksLikeComputerUseTurnEndedProcess: Bool {
-        let commandLine = commandLine
-        return commandLine.contains("skycomputeruseclient")
-            && commandLine.contains("turn-ended")
-            && commandLine.contains("\"thread-id\"")
     }
 
     var canHoldOpenCodexRolloutFile: Bool {

@@ -388,7 +388,9 @@ final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, NS
             menu.addItem(.separator())
             menu.addItem(infoMenuItem(title: model.text("当前", "Current")))
             for event in currentEvents {
-                menu.addItem(infoMenuItem(title: nativeSessionMenuTitle(event)))
+                let item = infoMenuItem(title: nativeSessionMenuTitle(event))
+                item.attributedTitle = nativeSessionAttributedTitle(event)
+                menu.addItem(item)
             }
         }
 
@@ -503,6 +505,31 @@ final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, NS
         model.activitySessionLine(for: session)
     }
 
+    /// 原生菜单 session 行：agent 标签套底色（claude 橙 / codex 浅紫），其余文本正常色。
+    private func nativeSessionAttributedTitle(_ session: SessionStatus) -> NSAttributedString {
+        let sep = " - "
+        let baseAttributes: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: model.activitySessionSourceTitle(for: session) + sep, attributes: baseAttributes))
+
+        let isClaude = ActivityPresentation.isClaudeActivity(session)
+        let isCodex = ActivityPresentation.isCodexActivity(session)
+        let agentBg: NSColor = isClaude
+            ? NSColor(srgbRed: 0.88, green: 0.46, blue: 0.18, alpha: 1)
+            : (isCodex ? NSColor(srgbRed: 0.77, green: 0.71, blue: 0.99, alpha: 1) : NSColor(srgbRed: 0.70, green: 0.70, blue: 0.75, alpha: 1))
+        let agentFg: NSColor = isClaude
+            ? .white
+            : (isCodex ? NSColor(srgbRed: 0.34, green: 0.22, blue: 0.60, alpha: 1) : .white)
+        let agent = model.activitySessionAgentLabel(for: session)
+        result.append(NSAttributedString(string: " \(agent) ", attributes: [
+            .backgroundColor: agentBg,
+            .foregroundColor: agentFg,
+            .font: NSFont.menuFont(ofSize: 0)
+        ]))
+        result.append(NSAttributedString(string: sep + model.activitySessionLineStatus(for: session) + sep + "(\(model.activitySessionName(for: session)))", attributes: baseAttributes))
+        return result
+    }
+
     private func nativeShortEventName(rawEvent: String?, signal: RuntimeSignal) -> String {
         guard let rawEvent, !rawEvent.isEmpty else {
             return nativeShortSignalName(signal)
@@ -605,17 +632,12 @@ final class StatusBarController: NSObject, NSMenuDelegate, NSPopoverDelegate, NS
     }
 
     private func preferredNativeStatusLampColor(for signal: RuntimeSignal) -> SignalLampColor {
+        // 用户要求：只有权限/阻塞亮红灯，其余（空闲/运行中/完成/需要查看/过期/暂停）一律绿灯，完全去掉黄灯。
         switch signal.displayState {
-        case .ready:
-            return .green
-        case .active:
-            return preferredActiveLampColor(for: signal)
-        case .completed:
-            return preferredCompletedLampColor()
-        case .needsReview, .stale, .paused:
-            return .yellow
         case .permission, .blocked:
             return .red
+        default:
+            return .green
         }
     }
 

@@ -24,7 +24,8 @@ public enum SignalLampAnimation {
         case .completed:
             return completedIntensity(color, tick: tick, customization: customization)
         case .needsReview:
-            guard color == .yellow else { return 0 }
+            // 用户要求完全去掉黄灯：需要查看也亮绿灯（不再黄）
+            guard color == .green else { return 0 }
             let values: [Double] = [0.45, 0.72, 1.0, 0.72, 0, 0, 0, 0]
             return values[adjustedTick(tick, speed: customization.alertSpeed) % values.count]
         case .permission:
@@ -34,7 +35,8 @@ public enum SignalLampAnimation {
         case .blocked:
             return color == .red && blockedTick(tick, speed: customization.alertSpeed) % 2 == 0 ? 1 : 0
         case .stale:
-            guard color == .yellow else { return 0 }
+            // 用户要求完全去掉黄灯：过期也亮绿灯（不再黄）
+            guard color == .green else { return 0 }
             let values: [Double] = [0.35, 0.5, 0.65, 0.5, 0, 0, 0, 0]
             return values[adjustedTick(tick, speed: customization.alertSpeed) % values.count]
         case .paused:

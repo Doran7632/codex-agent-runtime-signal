@@ -25,6 +25,7 @@ struct CompletionBubbleNotification: Equatable {
     let occurredAt: Date
     let sourceApplication: String
     let sessionName: String
+    let isClaude: Bool
 }
 
 final class CompletionBubbleEventTracker {
@@ -267,7 +268,8 @@ final class CompletionBubbleController {
                     kind: notification.notificationKind ?? .completion,
                     occurredAt: notification.updatedAt,
                     sourceApplication: displayInfo.sourceApplication,
-                    sessionName: displayInfo.sessionName
+                    sessionName: displayInfo.sessionName,
+                    isClaude: notification.session.map { ActivityPresentation.isClaudeActivity($0) } ?? false
                 )
             )
             playSound(sound(for: notification.notificationKind ?? .completion))
@@ -350,6 +352,7 @@ final class CompletionBubbleController {
             title: title(for: notification.kind),
             sourceApplication: notification.sourceApplication,
             sessionName: notification.sessionName,
+            isClaude: notification.isClaude,
             dismiss: { [weak self] in
                 self?.dismissBubble(id)
             }
@@ -476,45 +479,87 @@ private struct CompletionBubbleView: View {
     let title: String
     let sourceApplication: String
     let sessionName: String
+    let isClaude: Bool
     let dismiss: () -> Void
 
-    private let bubbleFill = LinearGradient(
-        colors: [
-            Color(red: 0.20, green: 0.22, blue: 0.25),
-            Color(red: 0.10, green: 0.11, blue: 0.13)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    @State private var sweepProgress: CGFloat = 0
+
+    // Claude 用降饱和暖橙（更柔和高级，区别于 codex 深灰）；粒子色仍由 kind 决定（蓝=完成/红=权限）。
+    private var bubbleFill: LinearGradient {
+        let colors: [Color] = isClaude
+            ? [
+                Color(red: 0.86, green: 0.56, blue: 0.33),
+                Color(red: 0.72, green: 0.43, blue: 0.21)
+            ]
+            : [
+                Color(red: 0.20, green: 0.22, blue: 0.25),
+                Color(red: 0.10, green: 0.11, blue: 0.13)
+            ]
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
     private let titleColor = Color(red: 0.96, green: 0.97, blue: 0.99)
-    private let secondaryColor = Color(red: 0.78, green: 0.82, blue: 0.88)
-    private let bodyColor = Color(red: 0.88, green: 0.91, blue: 0.96)
+    private let secondaryColor = NSColor(calibratedRed: 0.80, green: 0.84, blue: 0.90, alpha: 1)
+    private let bodyColor = NSColor(calibratedRed: 0.90, green: 0.93, blue: 0.97, alpha: 1)
+
+    // 苹方字体（PingFang SC / PingFang / system-ui / sans-serif 优先级由系统 fallback 处理）。
+    private func pingfang(_ size: CGFloat, weight: Font.Weight) -> Font {
+        .custom("PingFang SC", size: size).weight(weight)
+    }
 
     var body: some View {
         Button(action: dismiss) {
             ZStack {
+                // 胶囊底色
                 Capsule(style: .continuous)
                     .fill(bubbleFill)
+                // 顶部弧面高光（凸起/反光质感）
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.25), Color.white.opacity(0.06), Color.clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                // 粒子（保留）
                 CompletionBubbleParticleField(tint: kind.particleColor)
                     .clipShape(Capsule(style: .continuous))
                     .allowsHitTesting(false)
+                // 白光扫过（出现一次，左→右，剑锋闪光；渐变 + 轻微模糊）
+                GeometryReader { geo in
+                    let bandWidth = geo.size.width * 0.4
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, .white.opacity(0.35), .white.opacity(0.85), .white.opacity(0.35), .clear],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: bandWidth)
+                        .offset(x: -bandWidth + sweepProgress * (geo.size.width + bandWidth))
+                        .blur(radius: 1.5)
+                }
+                .clipShape(Capsule(style: .continuous))
+                .allowsHitTesting(false)
+                // 文字（苹方）
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(pingfang(11, weight: .bold))
                         .foregroundStyle(titleColor)
                         .lineLimit(1)
                     MarqueeText(
                         text: sourceApplication,
+                        fontName: "PingFangSC-Semibold",
                         fontSize: 10,
-                        weight: .semibold,
-                        color: NSColor(calibratedRed: 0.78, green: 0.82, blue: 0.88, alpha: 1)
+                        fallbackWeight: .semibold,
+                        color: secondaryColor
                     )
                     .frame(height: 12)
                     MarqueeText(
                         text: sessionName,
+                        fontName: "PingFangSC-Medium",
                         fontSize: 10,
-                        weight: .medium,
-                        color: NSColor(calibratedRed: 0.88, green: 0.91, blue: 0.96, alpha: 1)
+                        fallbackWeight: .medium,
+                        color: bodyColor
                     )
                     .frame(height: 13)
                 }
@@ -523,7 +568,13 @@ private struct CompletionBubbleView: View {
                 .padding(.vertical, 8)
             }
             .frame(width: size.width, height: size.height)
+            // 柔和外阴影（悬浮/层次）
+            .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 4)
             .contentShape(Capsule(style: .continuous))
+            .onAppear {
+                sweepProgress = 0
+                withAnimation(.easeOut(duration: 0.45)) { sweepProgress = 1 }
+            }
         }
         .buttonStyle(.plain)
     }
@@ -531,16 +582,14 @@ private struct CompletionBubbleView: View {
 
 private struct MarqueeText: View {
     let text: String
+    let fontName: String
     let fontSize: CGFloat
-    let weight: NSFont.Weight
+    let fallbackWeight: NSFont.Weight
     let color: NSColor
 
     var body: some View {
-        MarqueeTextRepresentable(
-            text: text,
-            font: NSFont.systemFont(ofSize: fontSize, weight: weight),
-            color: color
-        )
+        let font = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize, weight: fallbackWeight)
+        return MarqueeTextRepresentable(text: text, font: font, color: color)
     }
 }
 

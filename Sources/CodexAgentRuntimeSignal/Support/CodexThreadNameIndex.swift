@@ -12,6 +12,9 @@ protocol CodexThreadNameResolving: AnyObject {
     func hostApplicationName(for sessionID: String) -> String?
     func indexedSessions() -> [CodexIndexedSession]
     func knownSessions() -> [CodexIndexedSession]
+    /// 该 sessionID 对应的会话是否仍「打开」（用于过滤已退出的 hook 残留）。
+    /// 默认 true（不过滤）；ClaudeThreadNameIndex 覆盖为检查 sessions/<pid>.json 是否存在。
+    func isLiveSession(for sessionID: String) -> Bool
 }
 
 extension CodexThreadNameResolving {
@@ -25,6 +28,10 @@ extension CodexThreadNameResolving {
 
     func knownSessions() -> [CodexIndexedSession] {
         indexedSessions()
+    }
+
+    func isLiveSession(for sessionID: String) -> Bool {
+        true
     }
 }
 
@@ -543,27 +550,54 @@ final class CodexThreadNameIndex: CodexThreadNameResolving {
     }
 
     private static func hostApplicationName(in payload: [String: Any]) -> String? {
-        let originator = stringValue(in: payload, keys: ["originator"])?.lowercased() ?? ""
-        let source = stringValue(in: payload, keys: ["source", "client", "app", "application", "entrypoint", "runner"])?
-            .lowercased() ?? ""
-        let combined = [originator, source].joined(separator: " ")
+        // 分层仲裁：originator（权威启动来源）→ source（通道信号）→ cwd（非标准宿主兜底）。
+        // 旧实现把 originator+source 拼成一个串按固定顺序匹配，导致 originator=Codex Desktop
+        // 但 source=vscode 时被 vscode token 抢先命中、误判成 VS Code。分层后各来源独立判定，
+        // originator 优先，杜绝跨来源干扰。
+        let originator = stringValue(in: payload, keys: ["originator"]) ?? ""
+        let source = stringValue(in: payload, keys: ["source", "client", "app", "application", "entrypoint", "runner"]) ?? ""
 
-        if containsAny(combined, tokens: ["xcode"]) {
-            return "Xcode"
+        if let host = hostApplicationName(fromOriginator: originator) {
+            return host
         }
-        if containsAny(combined, tokens: ["idea", "intellij"]) {
-            return "IDEA"
+        if let host = hostApplicationName(fromSource: source) {
+            return host
         }
-        if containsAny(combined, tokens: ["jetbrains"]) {
-            return "IDEA"
-        }
-        if containsAny(combined, tokens: ["visual studio code", "vscode", "vs-code"]) {
-            return "VS Code"
-        }
-        if containsAny(combined, tokens: ["codex desktop"]) {
-            return "Codex Desktop"
-        }
+        return hostApplicationName(fromPayloadCWD: payload)
+    }
 
+    private static func hostApplicationName(fromOriginator originator: String) -> String? {
+        let lower = originator.lowercased()
+        guard !lower.isEmpty else { return nil }
+
+        // codex desktop 必须最先判定：Codex Desktop 的 source 常为 vscode（基于 Electron 内核），
+        // 若不优先会被 vscode token 抢走。
+        if lower.contains("codex desktop") { return "Codex Desktop" }
+        if lower.contains("xcode") { return "Xcode" }
+        if lower.contains("idea") || lower.contains("intellij") { return "IDEA" }
+        if lower.contains("jetbrains") { return "IDEA" }
+        if containsAny(lower, tokens: ["visual studio code", "vscode", "vs-code"]) { return "VS Code" }
+        if lower.contains("obsidian") { return "Obsidian" }
+        if lower.contains("open design") || lower.contains("opendesign") { return "OpenDesign" }
+
+        // codex 内部启动方式（codex-tui / codex_cli_rs / codex_exec / codex_vscode 已被上面 vscode 命中等）
+        // 或未知 originator：不透传，交给 source / cwd 层。
+        return nil
+    }
+
+    private static func hostApplicationName(fromSource source: String) -> String? {
+        let lower = source.lowercased()
+        // cli / unknown / exec / terminal 等是无宿主信号的通道值，显式忽略，避免误判。
+        guard !lower.isEmpty, !nonSignalingSources.contains(lower) else { return nil }
+
+        if lower.contains("xcode") { return "Xcode" }
+        if lower.contains("idea") || lower.contains("intellij") { return "IDEA" }
+        if lower.contains("jetbrains") { return "IDEA" }
+        if containsAny(lower, tokens: ["visual studio code", "vscode", "vs-code"]) { return "VS Code" }
+        return nil
+    }
+
+    private static func hostApplicationName(fromPayloadCWD payload: [String: Any]) -> String? {
         guard let cwd = stringValue(in: payload, keys: ["cwd"]) else { return nil }
         let components = URL(fileURLWithPath: cwd).standardizedFileURL.pathComponents
         guard let supportIndex = components.lastIndex(of: "Application Support"),
@@ -576,6 +610,10 @@ final class CodexThreadNameIndex: CodexThreadNameResolving {
             components[components.index(after: supportIndex)]
         )
     }
+
+    private static let nonSignalingSources: Set<String> = [
+        "cli", "unknown", "exec", "terminal", "tui", "shell"
+    ]
 
     private static func displayNameForApplicationSupportDirectory(_ directoryName: String) -> String? {
         let trimmed = directoryName.trimmingCharacters(in: .whitespacesAndNewlines)

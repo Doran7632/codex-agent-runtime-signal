@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+.codex/hooks.json
+.codex/hooks.json.*
+dist/
+DerivedData/
+marketing/social/
+*.xcuserdata/
+.DS_Store
+__pycache__/
+*.pyc

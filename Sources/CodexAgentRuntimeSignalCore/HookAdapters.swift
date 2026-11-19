@@ -189,12 +189,12 @@ public enum CodexHookAdapter {
 
 public enum ClaudeHookAdapter {
     private static let eventToSignal = normalizedEventMap([
-        "ConfigChange": .attention,
-        "CwdChanged": .attention,
+        "ConfigChange": .idle,
+        "CwdChanged": .idle,
         "Elicitation": .attention,
         "ElicitationResult": .working,
-        "FileChanged": .attention,
-        "InstructionsLoaded": .attention,
+        "FileChanged": .idle,
+        "InstructionsLoaded": .idle,
         "SessionStart": .sessionStart,
         "TaskCreated": .subagentStart,
         "TaskCompleted": .subagentStop,

@@ -41,8 +41,8 @@ APP_ICON="$APP_RESOURCES/AppIcon.icns"
 RELEASE_INFO="$APP_RESOURCES/$APP_NAME-release-info.json"
 VERSION_FILE="$ROOT_DIR/VERSION"
 VERSION_RESOURCE="$APP_RESOURCES/$APP_NAME-version.env"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/guan-ops/codex-agent-runtime-signal/releases/latest/download/appcast.xml}"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-lEr2AUplk4vAvH+IwB4DygGqobWmBkbyy1YYr1nRy70=}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/Doran7632/codex-agent-runtime-signal/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY-lEr2AUplk4vAvH+IwB4DygGqobWmBkbyy1YYr1nRy70=}"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
 cd "$ROOT_DIR"

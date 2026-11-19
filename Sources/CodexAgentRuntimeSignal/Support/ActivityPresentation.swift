@@ -184,6 +184,10 @@ enum ActivityPresentation {
         activitySourceKey(for: session).hasPrefix("codex:")
     }
 
+    static func isClaudeActivity(_ session: SessionStatus) -> Bool {
+        activitySourceKey(for: session).hasPrefix("claude:")
+    }
+
     static func activitySessionIdentityKey(for session: SessionStatus) -> String {
         if isPresenceSession(session) {
             return "presence:\(activitySourceKey(for: session))"
@@ -291,8 +295,11 @@ enum ActivityPresentation {
              "xcode-codex", "codex-obsidian", "obsidian-codex", "codex-acp":
             return "codex"
         case "claude", "claude-code", "claude-desktop", "claude-cli",
-             "claude-terminal", "terminal-claude", "claude-ide",
-             "idea-claude", "intellij-claude", "jetbrains-claude":
+             "claude-terminal", "terminal-claude", "claude-ide", "claude-xcode",
+             "idea-claude", "intellij-claude", "jetbrains-claude",
+             "claude-idea", "claude-intellij", "claude-jetbrains",
+             "claude-vscode", "vscode-claude", "xcode-claude",
+             "claude-obsidian", "obsidian-claude", "claude-acp":
             return "claude"
         default:
             return normalized
@@ -448,7 +455,7 @@ enum ActivityPresentation {
             return false
         }
 
-        if isOpenCodexSession(session) {
+        if isOpenCodexSession(session) || isOpenClaudeSession(session) {
             return true
         }
 
@@ -579,6 +586,16 @@ enum ActivityPresentation {
         isOpenCodexSession(session)
     }
 
+    static func isOpenClaudeSession(_ session: SessionStatus) -> Bool {
+        session.lastEvent == "ClaudeSessionOpen"
+            && isClaudeActivity(session)
+            && CodexThreadNameIndex.threadID(from: session.sessionID) != nil
+    }
+
+    static func isDiscoveredClaudeIdleSession(_ session: SessionStatus) -> Bool {
+        isOpenClaudeSession(session)
+    }
+
     static func isTerminalPresenceSession(_ session: SessionStatus) -> Bool {
         session.sessionID == "platform-presence:codex-cli"
             || session.lastEvent == "PlatformPresence:CLI"
@@ -600,7 +617,13 @@ extension MenuBarStatusModel {
     }
 
     func activitySessionLine(for session: SessionStatus) -> String {
-        "\(activitySessionSourceTitle(for: session)) - \(activitySessionLineStatus(for: session)) - (\(activitySessionName(for: session)))"
+        "\(activitySessionSourceTitle(for: session)) - \(activitySessionAgentLabel(for: session)) - \(activitySessionLineStatus(for: session)) - (\(activitySessionName(for: session)))"
+    }
+
+    func activitySessionAgentLabel(for session: SessionStatus) -> String {
+        if ActivityPresentation.isCodexActivity(session) { return "codex" }
+        if ActivityPresentation.isClaudeActivity(session) { return "claude" }
+        return friendlyAgentName(session.agent)
     }
 
     func activitySessionSourceTitle(for session: SessionStatus) -> String {
@@ -654,7 +677,12 @@ extension MenuBarStatusModel {
             return threadName
         }
 
-        if ActivityPresentation.isCodexActivity(session) {
+        if ActivityPresentation.isClaudeActivity(session),
+           let threadName = claudeThreadNameResolver.threadName(for: session.sessionID) {
+            return threadName
+        }
+
+        if ActivityPresentation.isCodexActivity(session) || ActivityPresentation.isClaudeActivity(session) {
             return text("未命名会话", "Unnamed session")
         }
 

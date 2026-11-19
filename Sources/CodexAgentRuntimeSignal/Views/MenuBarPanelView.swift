@@ -60,6 +60,7 @@ struct MenuBarPanelView: View {
         }
         .frame(width: Self.panelWidth)
         .preferredColorScheme(viewState.appTheme.colorScheme)
+        .onAppear { model.reloadSynchronouslyForUserInteraction() }
     }
 
     private var header: some View {
@@ -377,35 +378,53 @@ private struct SessionRowView: View {
     let session: SessionStatus
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(signalColor(session.signal))
                 .frame(width: 7, height: 7)
 
-            Text(displayLine)
+            Text(model.activitySessionSourceTitle(for: session))
+                .font(.caption)
+                .lineLimit(1)
+
+            Text(model.activitySessionAgentLabel(for: session))
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(agentBackground, in: Capsule())
+                .foregroundStyle(agentForeground)
+
+            Text(model.activitySessionLineStatus(for: session))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("(\(model.activitySessionName(for: session)))")
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(displayLine)
 
             Spacer()
         }
+        .help(model.activitySessionLine(for: session))
     }
 
-    private var displayLine: String {
-        model.activitySessionLine(for: session)
+    private var agentBackground: Color {
+        if ActivityPresentation.isClaudeActivity(session) { return Color(red: 0.88, green: 0.46, blue: 0.18) }
+        if ActivityPresentation.isCodexActivity(session) { return Color(red: 0.77, green: 0.71, blue: 0.99) }
+        return Color(red: 0.70, green: 0.70, blue: 0.75)
+    }
+
+    private var agentForeground: Color {
+        if ActivityPresentation.isClaudeActivity(session) { return .white }
+        if ActivityPresentation.isCodexActivity(session) { return Color(red: 0.34, green: 0.22, blue: 0.60) }
+        return .white
     }
 }
 
 private func signalColor(_ signal: RuntimeSignal) -> Color {
     switch signal.displayState {
-    case .ready, .active, .completed:
+    case .ready, .active, .completed, .needsReview, .stale, .paused:
         return Color(red: 0.16, green: 0.78, blue: 0.34)
-    case .needsReview:
-        return Color(red: 0.97, green: 0.72, blue: 0.16)
     case .permission, .blocked:
         return Color(red: 0.94, green: 0.20, blue: 0.18)
-    case .stale, .paused:
-        return .secondary
     }
 }

@@ -68,6 +68,34 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssert(activity?.event == "DesktopToolCall:request_user_input")
     }
 
+    func testCodexDesktopSessionParserMapsEscalatedToolCallsToPermissionRequest() {
+        let line = #"""
+        {"timestamp":"2026-07-02T10:20:43.081Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rtk curl -s -X POST http://127.0.0.1:8765/api/real-preview\",\"sandbox_permissions\":\"require_escalated\",\"justification\":\"需要实际调用页面编辑器的真机模拟预览接口。是否允许？\"}","call_id":"call_1"}}
+        """#
+
+        let activity = CodexDesktopSessionParser.activity(
+            from: line,
+            defaultSessionID: "codex-cli:thread"
+        )
+
+        XCTAssert(activity?.signal == .permissionRequest)
+        XCTAssert(activity?.event == "DesktopToolCall:exec_command")
+    }
+
+    func testCodexDesktopSessionParserMapsExplicitApprovalToolCallsToPermissionRequest() {
+        let line = """
+        {"timestamp":"2026-07-02T10:20:43.081Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","requires_approval":true,"call_id":"call_1"}}
+        """
+
+        let activity = CodexDesktopSessionParser.activity(
+            from: line,
+            defaultSessionID: "codex-cli:thread"
+        )
+
+        XCTAssert(activity?.signal == .permissionRequest)
+        XCTAssert(activity?.event == "DesktopToolCall:exec_command")
+    }
+
     func testCodexDesktopSessionParserDoesNotTreatPermissionProfileAsPermissionRequest() {
         let line = """
         {"timestamp":"2026-05-29T02:20:43.081Z","type":"turn_context","payload":{"approval_policy":"on-request","permission_profile":{"type":"managed","network":"restricted"}}}
@@ -1292,9 +1320,9 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssert(!SignalLampAnimation.isLit(.yellow, signal: .done, tick: 0))
         XCTAssert(!SignalLampAnimation.isLit(.red, signal: .done, tick: 0))
 
-        XCTAssert(SignalLampAnimation.isLit(.yellow, signal: .attention, tick: 0))
-        XCTAssert(!SignalLampAnimation.isLit(.yellow, signal: .attention, tick: 4))
-        XCTAssert(SignalLampAnimation.scale(.yellow, signal: .attention, tick: 0) < SignalLampAnimation.scale(.yellow, signal: .attention, tick: 2))
+        XCTAssert(SignalLampAnimation.isLit(.green, signal: .attention, tick: 0))
+        XCTAssert(!SignalLampAnimation.isLit(.green, signal: .attention, tick: 4))
+        XCTAssert(SignalLampAnimation.scale(.green, signal: .attention, tick: 0) < SignalLampAnimation.scale(.green, signal: .attention, tick: 2))
 
         XCTAssert(SignalLampAnimation.isLit(.red, signal: .permission, tick: 0))
         XCTAssert(!SignalLampAnimation.isLit(.red, signal: .permission, tick: 4))
@@ -1302,8 +1330,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssert(SignalLampAnimation.isLit(.red, signal: .blocked, tick: 0))
         XCTAssert(!SignalLampAnimation.isLit(.red, signal: .blocked, tick: 1))
 
-        XCTAssert(SignalLampAnimation.intensity(.yellow, signal: .stale, tick: 0) > 0)
-        XCTAssert(!SignalLampAnimation.isLit(.yellow, signal: .stale, tick: 4))
+        XCTAssert(SignalLampAnimation.intensity(.green, signal: .stale, tick: 0) > 0)
+        XCTAssert(!SignalLampAnimation.isLit(.green, signal: .stale, tick: 4))
     }
 
     func testStaleIsProducedWhenStatusFileIsCorruptOrSessionExpires() throws {
@@ -1496,11 +1524,11 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             """
             {
               "tag_name": "v1.2.0",
-              "html_url": "https://github.com/guan-ops/codex-agent-runtime-signal/releases/tag/v1.2.0",
+              "html_url": "https://github.com/Doran7632/codex-agent-runtime-signal/releases/tag/v1.2.0",
               "assets": [
                 {
                   "name": "CodexAgentRuntimeSignal-local.dmg",
-                  "browser_download_url": "https://github.com/guan-ops/codex-agent-runtime-signal/releases/download/v1.2.0/CodexAgentRuntimeSignal-local.dmg"
+                  "browser_download_url": "https://github.com/Doran7632/codex-agent-runtime-signal/releases/download/v1.2.0/CodexAgentRuntimeSignal-local.dmg"
                 }
               ]
             }
@@ -1520,7 +1548,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             httpVersion: nil,
             headerFields: nil
         )!
-        let releasePageURL = URL(string: "https://github.com/guan-ops/codex-agent-runtime-signal/releases/tag/v1.2.0")!
+        let releasePageURL = URL(string: "https://github.com/Doran7632/codex-agent-runtime-signal/releases/tag/v1.2.0")!
         let pageResponse = HTTPURLResponse(
             url: releasePageURL,
             statusCode: 200,
@@ -1581,6 +1609,39 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             "codex:terminal",
             "codex:ide:idea"
         ])
+    }
+
+    func testVisibleSessionsKeepsIdleClaudeDiscoverySession() {
+        // 回归：claude discovery 的 idle 会话（ClaudeSessionOpen）必须可见。
+        // 旧 isVisibleSession 只特判 isOpenCodexSession，claude idle 走 .ready 被过滤（app 漏显示 idle claude 会话）。
+        let now = Date()
+        let snapshot = SignalSnapshot(
+            aggregate: .working,
+            sessions: [
+                SessionStatus(
+                    sessionID: "claude-idea:3f7e0ec3-bbf5-427b-a251-db2596e21765",
+                    signal: .idle,
+                    updatedAt: now,
+                    agent: "claude-idea",
+                    lastEvent: "ClaudeSessionOpen"
+                ),
+                SessionStatus(
+                    sessionID: "claude-vscode:8d66f687-4f55-4b68-9e90-ce159fc9ef73",
+                    signal: .working,
+                    updatedAt: now,
+                    agent: "claude-vscode",
+                    lastEvent: "PreToolUse:Bash"
+                )
+            ],
+            recentEvents: [],
+            stateFileURL: URL(fileURLWithPath: "/tmp/codex-agent-runtime-signal/status.json"),
+            updatedAt: now
+        )
+
+        let visible = ActivityPresentation.visibleSessions(from: snapshot, now: now)
+
+        XCTAssertTrue(visible.contains { $0.sessionID == "claude-idea:3f7e0ec3-bbf5-427b-a251-db2596e21765" })
+        XCTAssertTrue(visible.contains { $0.sessionID == "claude-vscode:8d66f687-4f55-4b68-9e90-ce159fc9ef73" })
     }
 
     func testFloatingInfoSessionsFollowCurrentSessionsButExcludeIdleAndPaused() {
@@ -1776,7 +1837,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssertEqual(ActivityPresentation.activitySessionIdentityKey(for: visible[0]), "codex:thread:\(threadID)")
         XCTAssertEqual(
             model.activitySessionLine(for: visible[0]),
-            "IDEA - 运行中 - (申万二期迁移功能五)"
+            "IDEA - codex - 运行中 - (申万二期迁移功能五)"
         )
     }
 
@@ -1801,7 +1862,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "IDEA - 运行中 - (申万二期迁移功能五)"
+            "IDEA - codex - 运行中 - (申万二期迁移功能五)"
         )
     }
 
@@ -1823,7 +1884,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "IDEA - 运行中 - (Offset Explorer帮我安装这个软件)"
+            "IDEA - codex - 运行中 - (Offset Explorer帮我安装这个软件)"
         )
     }
 
@@ -1843,7 +1904,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "桌面终端 - 运行中 - (未命名会话)"
+            "桌面终端 - codex - 运行中 - (未命名会话)"
         )
     }
 
@@ -1884,7 +1945,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "桌面终端 - 运行中 - (帮我检测一下为什么现在电脑风扇开始转了，哪个软件开始耗能变高了)"
+            "桌面终端 - codex - 运行中 - (帮我检测一下为什么现在电脑风扇开始转了，哪个软件开始耗能变高了)"
         )
     }
 
@@ -1923,7 +1984,195 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "OpenDesign - 运行中 - (帮我生成一套输入法皮肤)"
+            "OpenDesign - codex - 运行中 - (帮我生成一套输入法皮肤)"
+        )
+    }
+
+    @MainActor
+    func testActivitySessionLineKeepsCodexDesktopWhenOriginatorIsCodexDesktopEvenIfSourceVSCode() throws {
+        // 回归：originator=Codex Desktop + source=vscode 时，宿主必须是 Codex Desktop。
+        // 旧 hostApplicationName 把 originator+source 拼成 "codex desktop vscode"，
+        // vscode token 排在 codex desktop 之前会先命中，误判成 VS Code。
+        let fixture = try makeTemporaryCodexSessionsRoot()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let threadID = "019efcac-7320-70e3-ae92-dd39a3c26024"
+        let sessionFile = fixture.sessionsRoot
+            .appendingPathComponent("2026/06/25", isDirectory: true)
+            .appendingPathComponent("rollout-2026-06-25T10-47-00-\(threadID).jsonl")
+        try FileManager.default.createDirectory(
+            at: sessionFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try [
+            #"{"type":"session_meta","payload":{"id":"\#(threadID)","cwd":"/Users/doranxavier/Documents/Codex/2026-06-25/co","originator":"Codex Desktop","source":"vscode"}}"#,
+            #"{"type":"event_msg","payload":{"type":"user_message","message":"帮我整理今天的桌面会话记录"}}"#
+        ].joined(separator: "\n")
+            .appending("\n")
+            .write(to: sessionFile, atomically: true, encoding: .utf8)
+
+        let resolver = CodexThreadNameIndex(
+            indexURL: fixture.directory.appendingPathComponent("missing-session-index.jsonl"),
+            sessionsRootURL: fixture.sessionsRoot
+        )
+        let model = MenuBarStatusModel(codexThreadNameResolver: resolver)
+        model.appLanguage = .zhHans
+        let session = SessionStatus(
+            sessionID: "codex-desktop:\(threadID)",
+            signal: .working,
+            updatedAt: Date(),
+            agent: "codex-desktop",
+            lastEvent: "DesktopToolCall:exec_command"
+        )
+
+        XCTAssertEqual(
+            model.activitySessionLine(for: session),
+            "Codex Desktop - codex - 运行中 - (帮我整理今天的桌面会话记录)"
+        )
+    }
+
+    func testClaudeThreadNameIndexUsesRenameThenFirstPrompt() throws {
+        // Claude 会话名：sessions/<pid>.json 的 name（rename）优先 → 无则 transcript 首问 fallback。
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("claude-idx-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let sessionsRoot = tmp.appendingPathComponent("sessions")
+        let projectsRoot = tmp.appendingPathComponent("projects")
+        let sidNamed = "11111111-1111-4111-8111-111111111111"
+        let sidFirstPrompt = "22222222-2222-4222-8222-222222222222"
+
+        try FileManager.default.createDirectory(at: sessionsRoot, withIntermediateDirectories: true)
+        try #"{"pid":1001,"sessionId":"\#(sidNamed)","cwd":"/x","name":"我的重命名会话"}"#
+            .write(to: sessionsRoot.appendingPathComponent("1001.json"), atomically: true, encoding: .utf8)
+        try #"{"pid":1002,"sessionId":"\#(sidFirstPrompt)","cwd":"/proj"}"#
+            .write(to: sessionsRoot.appendingPathComponent("1002.json"), atomically: true, encoding: .utf8)
+
+        // transcript：第一行 content 是 array（tool_result，应跳过），第二行才是真实首问（String content + origin.human）。
+        let projDir = projectsRoot.appendingPathComponent("-proj")
+        try FileManager.default.createDirectory(at: projDir, withIntermediateDirectories: true)
+        try """
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"噪声"}]}}
+        {"type":"user","message":{"role":"user","content":"帮我把这个项目重构一下"},"origin":{"kind":"human"}}
+        """.write(to: projDir.appendingPathComponent("\(sidFirstPrompt).jsonl"), atomically: true, encoding: .utf8)
+
+        let resolver = ClaudeThreadNameIndex(sessionsRootURL: sessionsRoot, projectsRootURL: projectsRoot)
+        XCTAssertEqual(resolver.threadName(for: "claude-cli:\(sidNamed)"), "我的重命名会话")
+        XCTAssertEqual(resolver.threadName(for: "claude-cli:\(sidFirstPrompt)"), "帮我把这个项目重构一下")
+        XCTAssertNil(resolver.hostApplicationName(for: "claude-cli:\(sidNamed)"))
+    }
+
+    @MainActor
+    func testClaudeIDEAgentSessionResolvesViaClaudeResolver() throws {
+        // claude-idea/claude-vscode 归一为 claude，isClaudeActivity 真，会话名走 claudeThreadNameResolver；宿主靠 runtimeKind=.ide + sourceDetail。
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("claude-e2e-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let sessionsRoot = tmp.appendingPathComponent("sessions")
+        try FileManager.default.createDirectory(at: sessionsRoot, withIntermediateDirectories: true)
+        let sid = "33333333-3333-4333-8333-333333333333"
+        try #"{"pid":2001,"sessionId":"\#(sid)","cwd":"/x","name":"端到端claude会话"}"#
+            .write(to: sessionsRoot.appendingPathComponent("2001.json"), atomically: true, encoding: .utf8)
+
+        let claudeResolver = ClaudeThreadNameIndex(
+            sessionsRootURL: sessionsRoot,
+            projectsRootURL: tmp.appendingPathComponent("projects")
+        )
+        let model = MenuBarStatusModel(claudeThreadNameResolver: claudeResolver)
+        model.appLanguage = .zhHans
+        let session = SessionStatus(
+            sessionID: "claude-idea:\(sid)",
+            signal: .idle,
+            updatedAt: Date(),
+            agent: "claude-idea",
+            lastEvent: "ClaudeSessionOpen"
+        )
+
+        XCTAssertTrue(ActivityPresentation.isClaudeActivity(session))
+        XCTAssertEqual(model.activitySessionName(for: session), "端到端claude会话")
+        XCTAssertEqual(model.activitySessionSourceTitle(for: session), "IDEA")
+        XCTAssertEqual(model.activitySessionLine(for: session), "IDEA - claude - 空闲 - (端到端claude会话)")
+    }
+
+    func testClaudeThreadNameIndexIsLiveSession() throws {
+        // 回归：isLiveSession 检查 sessions/<pid>.json 是否存在，过滤已退出 claude 的 hook 残留。
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("claude-live-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let sessionsRoot = tmp.appendingPathComponent("sessions")
+        try FileManager.default.createDirectory(at: sessionsRoot, withIntermediateDirectories: true)
+        let liveSid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        try #"{"pid":1001,"sessionId":"\#(liveSid)","cwd":"/x"}"#
+            .write(to: sessionsRoot.appendingPathComponent("1001.json"), atomically: true, encoding: .utf8)
+
+        let resolver = ClaudeThreadNameIndex(
+            sessionsRootURL: sessionsRoot,
+            projectsRootURL: tmp.appendingPathComponent("projects")
+        )
+        XCTAssertTrue(resolver.isLiveSession(for: "claude-cli:\(liveSid)"))
+        XCTAssertTrue(resolver.isLiveSession(for: liveSid))
+        XCTAssertFalse(resolver.isLiveSession(for: "claude-cli:deadbeef-1234-4abc-8def-0123456789ab"))
+        // 默认 resolver（codex）不过滤，恒 true
+        XCTAssertTrue(CodexThreadNameIndex().isLiveSession(for: "codex-cli:anything"))
+    }
+
+    func testHostApplicationNameLayeredResolution() throws {
+        // Layer 1 — originator 优先：Codex Desktop 不被 source=vscode 抢走（回归 order bug）。
+        try assertHostApplicationName(originator: "Codex Desktop", source: "vscode", cwd: "/Users/me/Projects/foo", expected: "Codex Desktop")
+        // originator 大小写不敏感。
+        try assertHostApplicationName(originator: "CODEX DESKTOP", source: "vscode", cwd: "/x", expected: "Codex Desktop")
+        // originator 缺失，Layer 2 source 单独命中 vscode。
+        try assertHostApplicationName(originator: nil, source: "vscode", cwd: "/x", expected: "VS Code")
+        // codex 内部 originator 含 ide 子串，Layer 1 仍按 originator 命中。
+        try assertHostApplicationName(originator: "codex-idea", source: "cli", cwd: "/x", expected: "IDEA")
+
+        // codex 内部启动方式 + 非信号 source + 普通 cwd → payload 层 nil（交下游 sourceDetail/runtimeKind 救）。
+        try assertHostApplicationName(originator: "codex-tui", source: "cli", cwd: "/Users/me/Projects/foo", expected: nil)
+        try assertHostApplicationName(originator: "codex_cli_rs", source: "unknown", cwd: "/Users/me/Projects/foo", expected: nil)
+        try assertHostApplicationName(originator: "codex_exec", source: "exec", cwd: "/Users/me/Projects/foo", expected: nil)
+
+        // Layer 3 — cwd 的 Application Support/<App> 兜底（OpenDesign 等非标准宿主）。
+        try assertHostApplicationName(originator: "codex_exec", source: "exec", cwd: "/Users/me/Library/Application Support/Open Design/ns/p1", expected: "OpenDesign")
+        try assertHostApplicationName(originator: "codex-tui", source: "cli", cwd: "/Users/me/Library/Application Support/Code/User", expected: "VS Code")
+        // Application Support 下含 codex 的目录仍返回 nil（防自指）。
+        try assertHostApplicationName(originator: "codex-tui", source: "cli", cwd: "/Users/me/Library/Application Support/Codex/Caches", expected: nil)
+
+        // client key 在 source 缺失时兜底（OpenDesign 的 client=codex_exec）。
+        try assertHostApplicationName(originator: "codex_exec", source: nil, client: "codex_exec", cwd: "/Users/me/Library/Application Support/Open Design/ns/p2", expected: "OpenDesign")
+    }
+
+    private func assertHostApplicationName(
+        originator: String?,
+        source: String?,
+        client: String? = nil,
+        cwd: String?,
+        expected: String?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let fixture = try makeTemporaryCodexSessionsRoot()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let threadID = "019eab11-7e00-7000-9000-000000000001"
+        let sessionFile = fixture.sessionsRoot
+            .appendingPathComponent("2026/06/25", isDirectory: true)
+            .appendingPathComponent("rollout-2026-06-25T00-00-00-\(threadID).jsonl")
+        try FileManager.default.createDirectory(
+            at: sessionFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var fields: [String] = [#""id":"\#(threadID)""#]
+        if let originator { fields.append(#""originator":"\#(originator)""#) }
+        if let source { fields.append(#""source":"\#(source)""#) }
+        if let client { fields.append(#""client":"\#(client)""#) }
+        if let cwd { fields.append(#""cwd":"\#(cwd)""#) }
+        let metaLine = #"{"type":"session_meta","payload":{\#(fields.joined(separator: ","))}}"#
+        try metaLine.appending("\n").write(to: sessionFile, atomically: true, encoding: .utf8)
+
+        let resolver = CodexThreadNameIndex(
+            indexURL: fixture.directory.appendingPathComponent("missing-session-index.jsonl"),
+            sessionsRootURL: fixture.sessionsRoot
+        )
+        XCTAssertEqual(
+            resolver.hostApplicationName(for: "codex-cli:\(threadID)"),
+            expected,
+            file: file,
+            line: line
         )
     }
 
@@ -1962,7 +2211,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "OpenDesign - 运行中 - (帮我把登录页改成深色模式)"
+            "OpenDesign - codex - 运行中 - (帮我把登录页改成深色模式)"
         )
     }
 
@@ -2101,7 +2350,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         XCTAssertEqual(
             model.activitySessionLine(for: session),
-            "Obsidian - 空闲 - (整理 Obsidian 笔记)"
+            "Obsidian - codex - 空闲 - (整理 Obsidian 笔记)"
         )
     }
 
@@ -2411,8 +2660,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssertEqual(
             visible.map { model.activitySessionLine(for: $0) },
             [
-                "桌面终端 - 运行中 - (正在运行的终端会话)",
-                "桌面终端 - 空闲 - (打开但空闲的终端会话)"
+                "桌面终端 - codex - 运行中 - (正在运行的终端会话)",
+                "桌面终端 - codex - 空闲 - (打开但空闲的终端会话)"
             ]
         )
     }
@@ -2464,8 +2713,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
         XCTAssertEqual(
             visible.map { model.activitySessionLine(for: $0) },
             [
-                "IDEA - 空闲 - (申万迁移二期功能四)",
-                "IDEA - 空闲 - (申万迁移二期功能十)"
+                "IDEA - codex - 空闲 - (申万迁移二期功能四)",
+                "IDEA - codex - 空闲 - (申万迁移二期功能十)"
             ]
         )
     }
@@ -2509,8 +2758,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now, limit: nil)
                 .map { model.activitySessionLine(for: $0) },
             [
-                "IDEA - 空闲 - (申万迁移二期功能四)",
-                "IDEA - 空闲 - (申万二期迁移功能六)"
+                "IDEA - codex - 空闲 - (申万迁移二期功能四)",
+                "IDEA - codex - 空闲 - (申万二期迁移功能六)"
             ]
         )
 
@@ -2527,8 +2776,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             ActivityPresentation.visibleSessions(from: model.activitySnapshot, now: now.addingTimeInterval(30), limit: nil)
                 .map { model.activitySessionLine(for: $0) },
             [
-                "IDEA - 空闲 - (申万迁移二期功能四)",
-                "IDEA - 运行中 - (申万二期迁移功能六)"
+                "IDEA - codex - 空闲 - (申万迁移二期功能四)",
+                "IDEA - codex - 运行中 - (申万二期迁移功能六)"
             ]
         )
     }
@@ -2601,7 +2850,7 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
 
         let visible = ActivityPresentation.visibleSessions(from: model.activitySnapshot, limit: nil)
         XCTAssertFalse(visible.contains { $0.sessionID == "codex-cli:\(threadID)" })
-        XCTAssertFalse(visible.contains { model.activitySessionLine(for: $0) == "OpenDesign - 空闲 - (帮我生成一套输入法皮肤)" })
+        XCTAssertFalse(visible.contains { model.activitySessionLine(for: $0) == "OpenDesign - codex - 空闲 - (帮我生成一套输入法皮肤)" })
     }
 
     func testActivityPresentationPrefersNewerCompletedCLIOverOlderThinking() {
@@ -2806,7 +3055,9 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
             in: fixture.store
         )
 
-        let model = MenuBarStatusModel(store: fixture.store)
+        // 用 CodexThreadNameIndex 作 resolver（isLiveSession 走协议默认 true），避免真实 ~/.claude/sessions
+        // 把测试用的 fixture claude session（claude-code:thread）误判为已退出而过滤掉。
+        let model = MenuBarStatusModel(store: fixture.store, claudeThreadNameResolver: CodexThreadNameIndex())
 
         XCTAssertEqual(model.runtimeSignalAgentSelectionMode, .following)
         XCTAssertEqual(model.displayRuntimeSignalAgentScopes, [.claudeCode])
@@ -3094,7 +3345,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
                     arguments: "codex app-server"
                 )
             ],
-            now: now
+            now: now,
+            claudeSessionsRoot: URL(fileURLWithPath: "/dev/null/empty-claude", isDirectory: true)
         )
 
         XCTAssertEqual(
@@ -3187,7 +3439,8 @@ final class CodexAgentRuntimeSignalCoreTests: XCTestCase {
                     arguments: "codex app-server"
                 )
             ],
-            now: Date(timeIntervalSince1970: 1_000)
+            now: Date(timeIntervalSince1970: 1_000),
+            claudeSessionsRoot: URL(fileURLWithPath: "/dev/null/empty-claude", isDirectory: true)
         )
 
         XCTAssertEqual(

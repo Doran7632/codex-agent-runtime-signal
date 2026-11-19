@@ -175,9 +175,9 @@ final class StatusBarIconRendererTests: XCTestCase {
         for style in TrafficSignalStyle.allCases {
             for layout in TrafficSignalLayout.allCases {
                 let attention = try renderedPixels(signal: .attention, tick: 2, layout: layout, style: style)
-                XCTAssert(attention.count(where: \.isYellowLampPixel) >= minimumVisibleLampPixels)
+                XCTAssert(attention.count(where: \.isGreenLampPixel) >= minimumVisibleLampPixels)
                 XCTAssert(attention.count(where: \.isRedLampPixel) == 0)
-                XCTAssert(attention.count(where: \.isGreenLampPixel) == 0)
+                XCTAssert(attention.count(where: \.isYellowLampPixel) == 0)
 
                 let permission = try renderedPixels(signal: .permission, tick: 2, layout: layout, style: style)
                 XCTAssert(permission.count(where: \.isRedLampPixel) >= minimumVisibleLampPixels)
@@ -193,10 +193,10 @@ final class StatusBarIconRendererTests: XCTestCase {
             (.idle, 0, .green),
             (.working, 0, .green),
             (.done, 0, .green),
-            (.attention, 2, .yellow),
+            (.attention, 2, .green),
             (.permission, 2, .red),
             (.blocked, 0, .red),
-            (.stale, 2, .yellow),
+            (.stale, 2, .green),
             (.off, 0, .none)
         ]
 
